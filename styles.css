@@ -315,7 +315,14 @@ button.soft-danger:active { background: color-mix(in srgb, var(--danger) 22%, tr
 .mode-seg button { font-size: 1rem; padding: 10px 0; }
 
 /* Cardio: intervaller */
-.set-grid.cardio { grid-template-columns: 28px 1fr 1fr 78px 32px; }
+.set-grid.cardio { grid-template-columns: 20px 1fr 1fr 1fr 58px 28px; gap: 6px; }
+.set-grid.cardio input { min-width: 0; padding-left: 4px; padding-right: 4px; }
+.set-grid.cardio .tempo { font-size: .78rem; }
+/* Cardioøkt-oppsett */
+.field-label { color: var(--muted); font-size: .85rem; margin-bottom: -4px; }
+.seg.wrap { flex-wrap: wrap; }
+.seg.wrap button { flex: 1 0 30%; }
+.card .seg { background: color-mix(in srgb, var(--bg) 55%, var(--card)); margin-bottom: 0; }
 .tempo { text-align: center; font-size: .85rem; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
 
 /* Cardio: tur */

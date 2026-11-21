@@ -46,6 +46,12 @@ const MODES = [
   { id: 'cardio', name: '🏃 Cardio' },
 ];
 
+// Oppsett for intervalløkter
+const PLANS = [
+  { id: 'fast',     name: 'Fast' },
+  { id: 'dynamisk', name: 'Dynamisk' },
+];
+
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
 function load() {
@@ -80,6 +86,17 @@ db.settings ??= { colors: {} };
 db.settings.custom ??= [{ name: 'Mitt tema 1', colors: null }, { name: 'Mitt tema 2', colors: null }];
 db.settings.activeSlot ??= null;
 db.settings.mode ??= 'styrke';
+
+// Cardio er egne økter (ikke program/øvelser):
+// { id, name, sport, kind:'tur'|'intervall', plan:'fast'|'dynamisk', work, rest, rounds, sets:[{ work, rest }] }
+if (!db.cardioWorkouts) {
+  db.cardioWorkouts = db.exercises.filter(e => e.type === 'cardio').map(e => ({
+    id: uid(), name: e.name, sport: e.sport || 'loping', kind: e.kind || 'intervall',
+    plan: 'fast', work: '4', rest: '2', rounds: '4', sets: [{ work: '4', rest: '2' }],
+  }));
+  db.exercises = db.exercises.filter(e => e.type !== 'cardio');
+  db.programs = db.programs.filter(p => p.type !== 'cardio');
+}
 
 const save = () => localStorage.setItem(STORE_KEY, JSON.stringify(db));
 const mode = () => db.settings.mode;
@@ -348,7 +365,48 @@ function ask(title, message = '', { ok = 'Slett', cancel = 'Avbryt', danger = tr
 }
 const notice = (title, message) => ask(title, message, { ok: 'OK', cancel: '', danger: false });
 
+// ---------- Cardioøkter ----------
+
+let cwDraft = null; // ny cardioøkt som ikke er opprettet ennå
+let cwEditOpen = false; // «Rediger økt» er lukket til vanlig
+const getCw = id => db.cardioWorkouts.find(w => w.id === id);
+const currentCw = () => (view.id ? getCw(view.id) : cwDraft);
+const newCardioDraft = () => ({
+  id: null, name: '', sport: 'loping', kind: 'intervall', plan: 'fast',
+  work: '4', rest: '2', rounds: '4', sets: [{ work: '4', rest: '2' }],
+});
+
+// Settene i en intervalløkt som [{ work, rest }]
+function cwPlanSets(w) {
+  if (w.kind !== 'intervall') return [];
+  if (w.plan === 'fast') return Array.from({ length: parseInt(w.rounds, 10) || 0 }, () => ({ work: w.work, rest: w.rest }));
+  return w.sets;
+}
+
+function cwSummary(w) {
+  const sport = sportName(w.sport);
+  if (w.kind === 'tur') return `${sport} · Tur`;
+  const sets = cwPlanSets(w);
+  const total = sets.reduce((a, s, i) => a + parseDuration(s.work) + (i < sets.length - 1 ? parseDuration(s.rest) : 0), 0);
+  const desc = w.plan === 'fast'
+    ? `${sets.length} × ${fmtClock(parseDuration(w.work))}, ${fmtClock(parseDuration(w.rest))} pause`
+    : `${sets.length} sett, dynamisk`;
+  return `${sport} · ${desc}${total ? ` · totalt ${fmtClock(total)}` : ''}`;
+}
+
+// Forrige gjennomføring av samme cardioøkt
+function lastCardio(workoutId) {
+  for (let i = db.history.length - 1; i >= 0; i--) {
+    const h = db.history[i];
+    if (h.type === 'cardio' && h.workoutId === workoutId && h.exercises[0]?.sets.length) {
+      return h.exercises[0].sets.map(setText).join(', ');
+    }
+  }
+  return null;
+}
+
 function homeProgramView() {
+  if (mode() === 'cardio') return { name: 'programs' };
   const p = getProgram(db.lastProgramByMode[mode()]);
   return p && p.type === mode() ? { name: 'program', programId: p.id } : { name: 'programs' };
 }
@@ -490,36 +548,32 @@ const SOUNDS = {
   done:  () => { beep(1046, 0.2); beep(1318, 0.2, 0.25); beep(1568, 0.6, 0.5); }, // ferdig
 };
 
-function timerDefaults(ex) {
-  const first = ex.sets.find(s => s.duration);
-  return { work: first?.duration || '4', rest: '3', rounds: String(Math.max(ex.sets.length, 1)) };
-}
-
-// Hvor i timeren vi er nå
+// Hvor i timeren vi er nå. t.works / t.rests = sekunder per sett
 function ivState(t) {
   let x = (Date.now() - t.startedAt) / 1000;
-  if (x < PREP_SECS) return { phase: 'prep', left: PREP_SECS - x, round: 1 };
+  if (x < PREP_SECS) return { phase: 'prep', left: PREP_SECS - x, total: PREP_SECS, round: 1 };
   x -= PREP_SECS;
-  for (let r = 1; r <= t.rounds; r++) {
-    if (x < t.work) return { phase: 'work', left: t.work - x, round: r };
-    x -= t.work;
-    if (r < t.rounds && t.rest > 0) {
-      if (x < t.rest) return { phase: 'rest', left: t.rest - x, round: r };
-      x -= t.rest;
+  const n = t.works.length;
+  for (let r = 0; r < n; r++) {
+    if (x < t.works[r]) return { phase: 'work', left: t.works[r] - x, total: t.works[r], round: r + 1 };
+    x -= t.works[r];
+    const rest = r < n - 1 ? t.rests[r] || 0 : 0;
+    if (rest > 0) {
+      if (x < rest) return { phase: 'rest', left: rest - x, total: rest, round: r + 1 };
+      x -= rest;
     }
   }
-  return { phase: 'done', left: 0, round: t.rounds };
+  return { phase: 'done', left: 0, total: 1, round: n, over: x };
 }
 
-const PHASE_LABEL = { prep: 'Gjør deg klar', work: 'Drag', rest: 'Pause', done: 'Ferdig!' };
+const PHASE_LABEL = { prep: 'Gjør deg klar', work: 'Aktiv', rest: 'Pause', done: 'Ferdig!' };
 
 function ivDisplayHtml(t) {
   const st = ivState(t);
-  const total = st.phase === 'prep' ? PREP_SECS : st.phase === 'work' ? t.work : t.rest;
-  const pct = st.phase === 'done' ? 100 : (1 - st.left / total) * 100;
+  const pct = st.phase === 'done' ? 100 : (1 - st.left / st.total) * 100;
   return `
     <div class="iv-phase ${st.phase}">
-      <div class="iv-label">${PHASE_LABEL[st.phase]}${st.phase === 'work' || st.phase === 'rest' ? ` <span>${st.round}/${t.rounds}</span>` : ''}</div>
+      <div class="iv-label">${PHASE_LABEL[st.phase]}${st.phase === 'work' || st.phase === 'rest' ? ` <span>${st.round}/${t.works.length}</span>` : ''}</div>
       <div class="iv-time">${fmtClock(Math.ceil(st.left))}</div>
       <div class="iv-progress"><span style="width:${pct}%"></span></div>
     </div>`;
@@ -534,21 +588,11 @@ function intervalTimerHtml(ex, i) {
         <button class="big" data-action="iv-stop">■ Stopp timer</button>
       </div>`;
   }
-  ex.timer ??= timerDefaults(ex);
-  const f = (k, label, ph, mode) => `
-    <label class="field"><span class="muted small">${label}</span>
-      <input type="text" inputmode="${mode}" autocomplete="off" placeholder="${ph}" value="${esc(ex.timer[k])}" data-timer="${k}" data-i="${i}"></label>`;
   return `
-    <details class="iv-timer" ${t ? '' : 'open'}>
-      <summary><strong>⏱ Intervall-timer</strong><span class="muted small">med lyd</span></summary>
-      <div class="iv-setup">
-        ${f('work', 'Drag (min / m:ss)', '4:00', 'decimal')}
-        ${f('rest', 'Pause (min / m:ss)', '3:00', 'decimal')}
-        ${f('rounds', 'Antall', '4', 'numeric')}
-      </div>
-      <button class="primary big" data-action="iv-start" data-i="${i}">▶ Start timer</button>
-      <div class="muted small" style="margin-top:6px">Pip ved start og slutt av hvert drag. Slå av lydløs-bryteren på iPhone og ha appen åpen.</div>
-    </details>`;
+    <div class="iv-timer">
+      <button class="primary big" data-action="iv-start" data-i="${i}" style="width:100%">⏱ Start intervall-timer</button>
+      <div class="muted small" style="margin-top:6px;text-align:center">Følger aktiv tid og pause over. Pip ved start og slutt av hvert sett – slå av lydløs-bryteren og ha appen åpen.</div>
+    </div>`;
 }
 
 async function keepAwake(on) {
@@ -568,6 +612,7 @@ function stopIntervalTimer() {
 function tickIntervalTimer() {
   const t = db.active?.intervalTimer;
   if (!t) return;
+  if (!t.works) { db.active.intervalTimer = null; return; } // timer fra eldre versjon
   const st = ivState(t);
   const sec = Math.ceil(st.left);
   const key = `${st.phase}-${st.round}`;
@@ -582,7 +627,7 @@ function tickIntervalTimer() {
   if (el) el.innerHTML = ivDisplayHtml(t);
   const hdr = document.getElementById('iv-header');
   if (hdr) hdr.textContent = `${PHASE_LABEL[st.phase]} ${fmtClock(sec)}`;
-  if (st.phase === 'done' && Date.now() - t.startedAt > 1000 * (PREP_SECS + t.rounds * t.work + (t.rounds - 1) * t.rest + 4)) {
+  if (st.phase === 'done' && st.over > 4) {
     stopIntervalTimer(); save(); render();
   }
 }
@@ -616,15 +661,16 @@ function intervalRows(ex, i, scope) {
   const rows = ex.sets.map((s, j) => `
     <div class="set-grid cardio">
       <span class="num">${j + 1}</span>
-      <input type="text" inputmode="decimal" autocomplete="off" placeholder="mm:ss" value="${esc(s.duration)}" ${fieldAttrs(scope, i, j, 'duration')}>
+      <input type="text" inputmode="decimal" autocomplete="off" placeholder="m:ss" value="${esc(s.duration)}" ${fieldAttrs(scope, i, j, 'duration')}>
+      <input type="text" inputmode="decimal" autocomplete="off" placeholder="m:ss" value="${esc(s.rest ?? '')}" ${fieldAttrs(scope, i, j, 'rest')}>
       <input type="text" inputmode="decimal" autocomplete="off" placeholder="km/t" value="${esc(s.speed)}" ${fieldAttrs(scope, i, j, 'speed')}>
       <span class="tempo" data-info="${scope}-${i}-${j}">${cardioInfo(s)}</span>
       <button class="danger" data-action="remove-set" data-scope="${scope}" data-i="${i}" data-s="${j}" aria-label="Fjern intervall">✕</button>
     </div>`).join('');
   return `
-    <div class="set-grid cardio head"><span class="num">#</span><span>Tid</span><span>Km/t</span><span>Tempo</span><span></span></div>
+    <div class="set-grid cardio head"><span class="num">#</span><span>Aktiv</span><span>Pause</span><span>Km/t</span><span>Tempo</span><span></span></div>
     ${rows}
-    <button data-action="add-set" data-scope="${scope}" data-i="${i}" style="width:100%">+ Legg til intervall</button>
+    <button data-action="add-set" data-scope="${scope}" data-i="${i}" style="width:100%">+ Legg til sett</button>
     ${scope === 'active' ? intervalTimerHtml(ex, i) : ''}`;
 }
 
@@ -644,7 +690,9 @@ function turFields(ex, i, scope) {
 function setCards(exercises, scope) {
   return exercises.map((ex, i) => {
     const kind = cardioKindOf(ex);
-    const last = scope === 'active' ? lastPerformance(ex.exerciseId) : null;
+    const cardioSession = !ex.exerciseId && kind; // cardioøkt (ikke øvelse fra biblioteket)
+    const last = scope !== 'active' ? null
+      : cardioSession ? lastCardio(db.active.workoutId) : lastPerformance(ex.exerciseId);
     const body = kind === 'tur' ? turFields(ex, i, scope)
       : kind === 'intervall' ? intervalRows(ex, i, scope)
       : strengthRows(ex, i, scope);
@@ -652,7 +700,8 @@ function setCards(exercises, scope) {
       <section class="card">
         <div class="card-head">
           <h3>${esc(ex.name)}</h3>
-          <button class="danger small" data-action="remove-card-ex" data-scope="${scope}" data-i="${i}">Fjern øvelse</button>
+          ${cardioSession ? `<span class="badge">${esc(sportName(ex.sport))}</span>`
+            : `<button class="danger small" data-action="remove-card-ex" data-scope="${scope}" data-i="${i}">Fjern øvelse</button>`}
         </div>
         ${last ? `<div class="muted small" style="margin-bottom:8px">Forrige gang: ${esc(last)}</div>` : ''}
         ${body}
@@ -662,7 +711,82 @@ function setCards(exercises, scope) {
 
 // ---------- Visninger ----------
 
+function renderCardioList() {
+  const items = db.cardioWorkouts.map(w => `
+    <div class="list-item clickable" data-action="open-cw" data-id="${w.id}">
+      <div><strong>${esc(w.name || 'Uten navn')}</strong><div class="muted small">${esc(cwSummary(w))}</div></div>
+      <span class="muted">›</span>
+    </div>`).join('');
+  return `
+    ${modeSwitch()}
+    <h1>Cardioøkter</h1>
+    <button class="primary big" data-action="new-cw" style="margin-bottom:16px">＋ Opprett ny økt</button>
+    ${items || '<p class="empty">Ingen cardioøkter ennå.</p>'}`;
+}
+
+function renderCardioWorkout() {
+  const isNew = !view.id;
+  const w = currentCw();
+  if (!w) return go({ name: 'programs' });
+  const seg = (key, list, cls = '') => `
+    <div class="seg ${cls}">${list.map(o =>
+      `<button class="${w[key] === o.id ? 'active' : ''}" data-action="cw-set" data-k="${key}" data-v="${o.id}">${o.name}</button>`).join('')}
+    </div>`;
+  const inp = (key, ph, i, mode = 'decimal') => `
+    <input type="text" inputmode="${mode}" autocomplete="off" placeholder="${ph}"
+           value="${esc(i === null ? w[key] : w.sets[i][key])}" data-cw="${key}" ${i === null ? '' : `data-i="${i}"`}>`;
+
+  let plan = '';
+  if (w.kind === 'intervall') {
+    const body = w.plan === 'fast' ? `
+      <div class="iv-setup">
+        <label class="field"><span class="muted small">Aktiv tid</span>${inp('work', '4:00', null)}</label>
+        <label class="field"><span class="muted small">Pause</span>${inp('rest', '2:00', null)}</label>
+        <label class="field"><span class="muted small">Antall sett</span>${inp('rounds', '4', null, 'numeric')}</label>
+      </div>` : `
+      <div class="set-grid dyn head"><span class="num">Sett</span><span>Aktiv tid</span><span>Pause</span><span></span></div>
+      ${w.sets.map((s, i) => `
+        <div class="set-grid dyn">
+          <span class="num">${i + 1}</span>
+          ${inp('work', '4:00', i)}
+          ${inp('rest', '2:00', i)}
+          <button class="danger" data-action="cw-remove-set" data-i="${i}" aria-label="Fjern sett" ${w.sets.length < 2 ? 'disabled' : ''}>✕</button>
+        </div>`).join('')}
+      <button data-action="cw-add-set" style="width:100%">+ Legg til sett</button>`;
+    plan = `
+      <div class="field-label">Intervaller</div>
+      ${seg('plan', PLANS)}
+      ${body}
+      <div class="muted small">Tid skrives i minutter («4») eller min:sek («1:30»).</div>`;
+  }
+
+  const fields = `
+    <label class="field"><span class="muted small">Navn</span>
+      <input type="text" autocomplete="off" placeholder="F.eks. «4×4 intervaller» eller «Rolig tur»" value="${esc(w.name)}" data-cw="name"></label>
+    <div class="field-label">Kategori</div>
+    ${seg('sport', SPORTS, 'wrap')}
+    <div class="field-label">Type</div>
+    ${seg('kind', KINDS)}
+    ${plan}`;
+
+  return `
+    <button class="link" data-action="nav" data-view="programs">‹ Cardioøkter</button>
+    <h1>${isNew ? 'Ny cardioøkt' : esc(w.name || 'Uten navn')}</h1>
+    ${isNew ? '' : `
+      <button class="primary big" data-action="start-cw">▶ Start økt</button>
+      <div class="muted small" id="cw-summary" style="margin:8px 0 16px;text-align:center">${esc(cwSummary(w))}</div>`}
+    ${isNew ? `
+      <div class="card stack">${fields}</div>
+      <div class="section"><button class="primary big" data-action="create-cw">Opprett økt</button></div>` : `
+      <details class="card new-ex" data-cwedit ${cwEditOpen ? 'open' : ''}>
+        <summary><strong>Rediger økt</strong><span class="chev">›</span></summary>
+        <div class="stack" style="margin-top:12px">${fields}</div>
+        <div class="section"><button class="soft-danger big" data-action="delete-cw">Slett økt</button></div>
+      </details>`}`;
+}
+
 function renderPrograms() {
+  if (mode() === 'cardio') return renderCardioList();
   const list = db.programs.filter(p => p.type === mode());
   const items = list.map(p => `
     <div class="list-item clickable" data-action="open-program" data-id="${p.id}">
@@ -747,7 +871,7 @@ function libraryItem(e, showGroup) {
 }
 
 function libraryGroupsHtml() {
-  const type = mode();
+  const type = 'styrke'; // cardio ligger som egne økter, ikke i biblioteket
   const sorted = db.exercises.filter(e => e.type === type).sort((a, b) => a.name.localeCompare(b.name, 'nb'));
   const q = libQuery.trim().toLowerCase();
   if (q) {
@@ -769,14 +893,12 @@ function libraryGroupsHtml() {
 }
 
 function renderLibrary() {
-  const cardio = mode() === 'cardio';
   return `
-    ${modeSwitch()}
-    <h1>${cardio ? 'Cardioøvelser' : 'Styrkeøvelser'}</h1>
+    <h1>Øvelser</h1>
     <details class="card new-ex" data-newex ${newExOpen ? 'open' : ''}>
       <summary><strong>＋ Opprett ny øvelse</strong><span class="chev">›</span></summary>
       <form class="stack" data-form="new-exercise" style="margin-top:12px">
-        ${exerciseFormFields({}, mode())}
+        ${exerciseFormFields({}, 'styrke')}
         <button class="primary">Legg til</button>
       </form>
     </details>
@@ -1002,7 +1124,7 @@ function renderSession() {
   if (!a) return go(homeProgramView());
   return `
     ${setCards(a.exercises, 'active') || '<p class="empty">Ingen øvelser i økta. Legg til under.</p>'}
-    ${exercisePicker('session-add-exercise', a.type)}
+    ${a.type === 'cardio' ? '' : exercisePicker('session-add-exercise', a.type)}
     <div class="section stack">
       <button class="primary big" data-action="finish-session">✓ Fullfør økt</button>
       <button class="soft-danger big" data-action="cancel-session">Avbryt økt</button>
@@ -1054,7 +1176,7 @@ function renderHistoryEdit() {
         <input type="text" inputmode="numeric" pattern="[0-9]*" value="${esc(d._minutes)}" data-meta="_minutes"></label>
     </div>
     ${setCards(d.exercises, 'edit')}
-    ${exercisePicker('edit-add-exercise', d.type)}
+    ${d.type === 'cardio' ? '' : exercisePicker('edit-add-exercise', d.type)}
     <div class="section stack">
       <button class="primary big" data-action="save-history">Lagre endringer</button>
       <button class="big" data-action="nav" data-view="history">Avbryt</button>
@@ -1207,10 +1329,10 @@ const VIEWS = {
   programs: renderPrograms, program: renderProgram, workout: renderWorkout,
   library: renderLibrary, exercise: renderExercise, stats: renderStats,
   session: renderSession, history: renderHistory, historyEdit: renderHistoryEdit,
-  profile: renderProfile, settings: renderSettings,
+  profile: renderProfile, settings: renderSettings, cardioWorkout: renderCardioWorkout,
 };
 
-const TAB_OF = { program: 'programs', workout: 'programs', exercise: 'library', stats: 'profile', settings: 'profile', historyEdit: 'history' };
+const TAB_OF = { program: 'programs', workout: 'programs', cardioWorkout: 'programs', exercise: 'library', stats: 'profile', settings: 'profile', historyEdit: 'history' };
 
 function render() {
   const html = VIEWS[view.name]();
@@ -1222,8 +1344,13 @@ function render() {
     b.classList.toggle('active', b.dataset.view === tab));
 }
 
+// Husker siste side i hver fane, så man kommer tilbake dit man var
+const lastViewByTab = {};
+
 function go(newView) {
   view = newView;
+  const tab = TAB_OF[view.name] ?? view.name;
+  if (['programs', 'library', 'history', 'profile'].includes(tab)) lastViewByTab[tab] = view;
   render();
   window.scrollTo(0, 0);
 }
@@ -1246,6 +1373,13 @@ document.addEventListener('visibilitychange', tick);
 // ---------- Handlinger ----------
 
 const actions = {
+  // Menylinja nederst: tilbake til siste side i fanen. Trykk på fanen du allerede er i = gå til toppen av fanen.
+  'tab': d => {
+    const current = TAB_OF[view.name] ?? view.name;
+    const last = lastViewByTab[d.view];
+    if (last && current !== d.view) go(last);
+    else actions.nav(d);
+  },
   'nav': d => {
     if (d.view === 'stats') statsState.type = null; // start på valgt modus
     if (d.view === 'library') newExOpen = false;
@@ -1255,7 +1389,7 @@ const actions = {
     db.settings.mode = d.mode;
     libQuery = '';
     save();
-    go(view.name === 'library' ? { name: 'library' } : homeProgramView());
+    go(homeProgramView());
   },
   'all-programs': () => go({ name: 'programs' }),
   'open-program': d => go({ name: 'program', programId: d.id }),
@@ -1335,6 +1469,74 @@ const actions = {
     };
     save(); go({ name: 'session' });
   },
+  // Cardioøkter
+  'new-cw': () => { cwDraft = newCardioDraft(); go({ name: 'cardioWorkout', id: null }); },
+  'open-cw': d => { cwEditOpen = false; go({ name: 'cardioWorkout', id: d.id }); },
+  'cw-set': d => {
+    const w = currentCw();
+    // Fra fast til dynamisk: start med settene fra det faste oppsettet
+    if (d.k === 'plan' && d.v === 'dynamisk' && w.plan === 'fast') {
+      const sets = cwPlanSets(w);
+      if (sets.length) w.sets = sets.map(s => ({ ...s }));
+    }
+    w[d.k] = d.v;
+    if (view.id) save();
+    render();
+  },
+  'cw-add-set': () => {
+    const w = currentCw();
+    const prev = w.sets[w.sets.length - 1];
+    w.sets.push(prev ? { ...prev } : { work: '4', rest: '2' });
+    if (view.id) save();
+    render();
+  },
+  'cw-remove-set': d => {
+    currentCw().sets.splice(+d.i, 1);
+    if (view.id) save();
+    render();
+  },
+  'create-cw': () => {
+    const w = cwDraft;
+    w.name = w.name.trim();
+    if (!w.name) { notice('Mangler navn', 'Gi økta et navn, f.eks. «4×4 intervaller».'); return; }
+    if (w.kind === 'intervall' && !cwPlanSets(w).some(s => parseDuration(s.work))) {
+      notice('Mangler tid', 'Fyll inn aktiv tid og antall sett.'); return;
+    }
+    w.id = uid();
+    db.cardioWorkouts.push(w);
+    cwDraft = null;
+    save(); go({ name: 'cardioWorkout', id: w.id });
+  },
+  'delete-cw': async () => {
+    const w = getCw(view.id);
+    if (!await ask(`Slette «${w.name}»?`, 'Økta slettes. Historikken beholdes.', { ok: 'Slett økt' })) return;
+    db.cardioWorkouts = db.cardioWorkouts.filter(x => x !== w);
+    save(); go({ name: 'programs' });
+  },
+  'start-cw': async () => {
+    const w = getCw(view.id);
+    const plan = cwPlanSets(w);
+    if (w.kind === 'intervall' && !plan.some(s => parseDuration(s.work))) {
+      notice('Mangler tid', 'Legg inn aktiv tid for settene først.'); return;
+    }
+    if (db.active && !await ask('Du har allerede en økt i gang', `Vil du avbryte «${db.active.workoutName}» og starte en ny?`, { ok: 'Start ny økt' })) return;
+    stopIntervalTimer();
+    db.active = {
+      type: 'cardio',
+      programId: null,
+      workoutId: w.id,
+      programName: sportName(w.sport),
+      workoutName: w.name,
+      startedAt: Date.now(),
+      exercises: [{
+        exerciseId: null, name: w.name, timed: false, kind: w.kind, sport: w.sport,
+        sets: w.kind === 'tur'
+          ? [{ distance: '', duration: '' }]
+          : plan.map(s => ({ duration: s.work, rest: s.rest, speed: '' })),
+      }],
+    };
+    save(); go({ name: 'session' });
+  },
   'add-set': d => {
     const ex = setTarget(d.scope).exercises[+d.i];
     const prev = ex.sets[ex.sets.length - 1];
@@ -1352,18 +1554,11 @@ const actions = {
   'iv-start': d => {
     unlockAudio(); // må skje i selve trykket for at iPhone skal spille lyd
     const ex = db.active.exercises[+d.i];
-    const cfg = ex.timer ?? timerDefaults(ex);
-    const work = parseDuration(cfg.work), rest = parseDuration(cfg.rest), rounds = parseInt(cfg.rounds, 10) || 0;
-    if (!work || !rounds) { notice('Mangler tid', 'Fyll inn hvor lenge hvert drag varer og antall drag.'); return; }
+    const works = ex.sets.map(s => parseDuration(s.duration));
+    if (!works.length || works.some(w => !w)) { notice('Mangler tid', 'Fyll inn aktiv tid for alle settene.'); return; }
     stopStopwatch();
-    // Sørg for ett intervall per drag, og fyll inn tid der det mangler
-    while (ex.sets.length < rounds) {
-      const prev = ex.sets[ex.sets.length - 1];
-      ex.sets.push(prev ? { ...prev } : emptySetFor(ex));
-    }
-    ex.sets.slice(0, rounds).forEach(s => { if (!s.duration) s.duration = cfg.work; });
     lastPhaseKey = lastTickKey = null;
-    db.active.intervalTimer = { i: +d.i, work, rest, rounds, startedAt: Date.now() };
+    db.active.intervalTimer = { i: +d.i, works, rests: ex.sets.map(s => parseDuration(s.rest)), startedAt: Date.now() };
     keepAwake(true);
     SOUNDS.tick();
     save(); render();
@@ -1501,13 +1696,8 @@ const forms = {
       notice('Øvelsen finnes allerede', `«${f.name}» ligger allerede i biblioteket.`);
       return;
     }
-    if (mode() === 'cardio') {
-      db.exercises.push({ id: uid(), type: 'cardio', name: f.name, kind: f.kind, sport: f.sport, category: '', subs: [], equipment: '', timed: false });
-      openCats.add(`cardio-${f.kind}`);
-    } else {
-      db.exercises.push({ id: uid(), type: 'styrke', name: f.name, category: f.category, subs: f.subs, equipment: f.equipment, timed: f.timed });
-      openCats.add(`styrke-${f.category}`);
-    }
+    db.exercises.push({ id: uid(), type: 'styrke', name: f.name, category: f.category, subs: f.subs, equipment: f.equipment, timed: f.timed });
+    openCats.add(`styrke-${f.category}`);
   },
   'edit-exercise': f => {
     const ex = getExercise(view.exerciseId);
@@ -1547,7 +1737,8 @@ document.addEventListener('visibilitychange', () => {
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-action]');
   if (!el || el.disabled) return;
-  actions[el.dataset.action]?.(el.dataset);
+  const action = el.closest('#nav') ? 'tab' : el.dataset.action;
+  actions[action]?.(el.dataset);
 });
 
 document.addEventListener('submit', e => {
@@ -1600,6 +1791,7 @@ document.addEventListener('change', e => {
 // Husk hvilke grupper som er åpne i biblioteket
 document.addEventListener('toggle', e => {
   if (e.target.matches?.('[data-newex]')) { newExOpen = e.target.open; return; }
+  if (e.target.matches?.('[data-cwedit]')) { cwEditOpen = e.target.open; return; }
   const cat = e.target.dataset?.cat;
   if (cat === undefined) return;
   e.target.open ? openCats.add(cat) : openCats.delete(cat);
@@ -1646,13 +1838,19 @@ document.addEventListener('input', e => {
     editDraft[el.dataset.meta] = el.value;
     return;
   }
-  // Oppsett av intervall-timer
-  if (el.dataset.timer && db.active) {
-    el.value = el.value.replace(el.dataset.timer === 'rounds' ? /[^0-9]/g : /[^0-9:.,]/g, '');
-    const ex = db.active.exercises[+el.dataset.i];
-    ex.timer ??= timerDefaults(ex);
-    ex.timer[el.dataset.timer] = el.value;
-    save();
+  // Oppsett av cardioøkt
+  if (el.dataset.cw) {
+    const w = currentCw();
+    if (!w) return;
+    const k = el.dataset.cw;
+    if (k !== 'name') el.value = el.value.replace(k === 'rounds' ? /[^0-9]/g : /[^0-9:.,]/g, '');
+    if (el.dataset.i !== undefined) w.sets[+el.dataset.i][k] = el.value;
+    else w[k] = el.value;
+    if (view.id) {
+      save();
+      const s = document.getElementById('cw-summary');
+      if (s) s.textContent = cwSummary(w);
+    }
     return;
   }
   // Sett-verdier lagres fortløpende uten å rendre på nytt (beholder fokus i feltet)
@@ -1661,7 +1859,7 @@ document.addEventListener('input', e => {
   const target = setTarget(el.dataset.scope);
   if (!target) return;
   const clean = ['weight', 'speed', 'distance'].includes(field) ? el.value.replace(/[^0-9.,]/g, '')
-    : field === 'duration' ? el.value.replace(/[^0-9:.,]/g, '')
+    : field === 'duration' || field === 'rest' ? el.value.replace(/[^0-9:.,]/g, '')
     : el.value.replace(/[^0-9]/g, '');
   if (clean !== el.value) el.value = clean;
   const set = target.exercises[+el.dataset.i].sets[+el.dataset.s];

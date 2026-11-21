@@ -414,6 +414,142 @@ function stopStopwatch() {
   db.active.stopwatch = null;
 }
 
+// ---------- Intervall-timer med lyd ----------
+// db.active.intervalTimer = { i, work, rest, rounds, startedAt } (sekunder)
+// Oppsett per øvelse lagres i ex.timer = { work, rest, rounds } (tekst slik det er skrevet)
+
+const PREP_SECS = 5; // nedtelling før første drag
+let audioCtx = null;
+let wakeLock = null;
+let lastPhaseKey = null, lastTickKey = null;
+
+// iPhone krever at lyd «låses opp» av et trykk fra brukeren
+function unlockAudio() {
+  try {
+    audioCtx ??= new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state !== 'running') audioCtx.resume();
+    const b = audioCtx.createBuffer(1, 1, 22050), src = audioCtx.createBufferSource();
+    src.buffer = b; src.connect(audioCtx.destination); src.start(0);
+  } catch (e) { /* ingen lyd tilgjengelig */ }
+}
+
+function beep(freq, dur, at = 0, vol = 0.5) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime + at;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = 'square';
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+  g.gain.setValueAtTime(vol, t + dur - 0.03);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(audioCtx.destination);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+const SOUNDS = {
+  tick:  () => beep(660, 0.12, 0, 0.3),                                  // 3-2-1
+  work:  () => beep(1046, 0.7),                                          // drag starter
+  rest:  () => { beep(784, 0.25); beep(523, 0.45, 0.32); },              // drag ferdig -> pause
+  done:  () => { beep(1046, 0.2); beep(1318, 0.2, 0.25); beep(1568, 0.6, 0.5); }, // ferdig
+};
+
+function timerDefaults(ex) {
+  const first = ex.sets.find(s => s.duration);
+  return { work: first?.duration || '4', rest: '3', rounds: String(Math.max(ex.sets.length, 1)) };
+}
+
+// Hvor i timeren vi er nå
+function ivState(t) {
+  let x = (Date.now() - t.startedAt) / 1000;
+  if (x < PREP_SECS) return { phase: 'prep', left: PREP_SECS - x, round: 1 };
+  x -= PREP_SECS;
+  for (let r = 1; r <= t.rounds; r++) {
+    if (x < t.work) return { phase: 'work', left: t.work - x, round: r };
+    x -= t.work;
+    if (r < t.rounds && t.rest > 0) {
+      if (x < t.rest) return { phase: 'rest', left: t.rest - x, round: r };
+      x -= t.rest;
+    }
+  }
+  return { phase: 'done', left: 0, round: t.rounds };
+}
+
+const PHASE_LABEL = { prep: 'Gjør deg klar', work: 'Drag', rest: 'Pause', done: 'Ferdig!' };
+
+function ivDisplayHtml(t) {
+  const st = ivState(t);
+  const total = st.phase === 'prep' ? PREP_SECS : st.phase === 'work' ? t.work : t.rest;
+  const pct = st.phase === 'done' ? 100 : (1 - st.left / total) * 100;
+  return `
+    <div class="iv-phase ${st.phase}">
+      <div class="iv-label">${PHASE_LABEL[st.phase]}${st.phase === 'work' || st.phase === 'rest' ? ` <span>${st.round}/${t.rounds}</span>` : ''}</div>
+      <div class="iv-time">${fmtClock(Math.ceil(st.left))}</div>
+      <div class="iv-progress"><span style="width:${pct}%"></span></div>
+    </div>`;
+}
+
+function intervalTimerHtml(ex, i) {
+  const t = db.active.intervalTimer;
+  if (t && t.i === i) {
+    return `
+      <div class="iv-timer running">
+        <div id="iv-display">${ivDisplayHtml(t)}</div>
+        <button class="big" data-action="iv-stop">■ Stopp timer</button>
+      </div>`;
+  }
+  ex.timer ??= timerDefaults(ex);
+  const f = (k, label, ph, mode) => `
+    <label class="field"><span class="muted small">${label}</span>
+      <input type="text" inputmode="${mode}" autocomplete="off" placeholder="${ph}" value="${esc(ex.timer[k])}" data-timer="${k}" data-i="${i}"></label>`;
+  return `
+    <details class="iv-timer" ${t ? '' : 'open'}>
+      <summary><strong>⏱ Intervall-timer</strong><span class="muted small">med lyd</span></summary>
+      <div class="iv-setup">
+        ${f('work', 'Drag (min / m:ss)', '4:00', 'decimal')}
+        ${f('rest', 'Pause (min / m:ss)', '3:00', 'decimal')}
+        ${f('rounds', 'Antall', '4', 'numeric')}
+      </div>
+      <button class="primary big" data-action="iv-start" data-i="${i}">▶ Start timer</button>
+      <div class="muted small" style="margin-top:6px">Pip ved start og slutt av hvert drag. Slå av lydløs-bryteren på iPhone og ha appen åpen.</div>
+    </details>`;
+}
+
+async function keepAwake(on) {
+  try {
+    if (on && !wakeLock) wakeLock = await navigator.wakeLock?.request('screen');
+    if (!on && wakeLock) { wakeLock.release(); wakeLock = null; }
+  } catch (e) { wakeLock = null; }
+}
+
+function stopIntervalTimer() {
+  if (db.active) db.active.intervalTimer = null;
+  lastPhaseKey = lastTickKey = null;
+  keepAwake(false);
+}
+
+// Kalles fra tick(): oppdaterer visningen og spiller lyd ved overganger
+function tickIntervalTimer() {
+  const t = db.active?.intervalTimer;
+  if (!t) return;
+  const st = ivState(t);
+  const sec = Math.ceil(st.left);
+  const key = `${st.phase}-${st.round}`;
+  // Lyd når en ny fase starter (ikke første gang, f.eks. når appen åpnes igjen midt i en fase)
+  if (lastPhaseKey !== null && key !== lastPhaseKey) SOUNDS[st.phase]?.();
+  lastPhaseKey = key;
+  // Korte pip de tre siste sekundene av hver fase
+  const tickKey = `${key}-${sec}`;
+  if (st.phase !== 'done' && sec >= 1 && sec <= 3 && tickKey !== lastTickKey) SOUNDS.tick();
+  lastTickKey = tickKey;
+  const el = document.getElementById('iv-display');
+  if (el) el.innerHTML = ivDisplayHtml(t);
+  const hdr = document.getElementById('iv-header');
+  if (hdr) hdr.textContent = `${PHASE_LABEL[st.phase]} ${fmtClock(sec)}`;
+  if (st.phase === 'done' && Date.now() - t.startedAt > 1000 * (PREP_SECS + t.rounds * t.work + (t.rounds - 1) * t.rest + 4)) {
+    stopIntervalTimer(); save(); render();
+  }
+}
+
 function strengthRows(ex, i, scope) {
   const timed = isTimedEx(ex);
   const withClock = timed && scope === 'active';
@@ -451,7 +587,8 @@ function intervalRows(ex, i, scope) {
   return `
     <div class="set-grid cardio head"><span class="num">#</span><span>Tid</span><span>Km/t</span><span>Tempo</span><span></span></div>
     ${rows}
-    <button data-action="add-set" data-scope="${scope}" data-i="${i}" style="width:100%">+ Legg til intervall</button>`;
+    <button data-action="add-set" data-scope="${scope}" data-i="${i}" style="width:100%">+ Legg til intervall</button>
+    ${scope === 'active' ? intervalTimerHtml(ex, i) : ''}`;
 }
 
 function turFields(ex, i, scope) {
@@ -503,8 +640,17 @@ function renderPrograms() {
     <form class="row section" data-form="new-program">
       <input name="name" placeholder="${cardio ? 'Nytt program, f.eks. «Løpeplan»' : 'Nytt program, f.eks. «Push/Pull/Legs»'}" required>
       <button class="primary">Legg til</button>
-    </form>`;
+    </form>
+    ${freeStartHtml()}`;
 }
+
+const freeStartHtml = () => `
+  <div class="section">
+    <button class="free-start" data-action="start-free">
+      <span class="free-icon">▶</span>
+      <strong>Start ny økt</strong>
+    </button>
+  </div>`;
 
 function renderProgram() {
   const p = getProgram(view.programId);
@@ -523,6 +669,7 @@ function renderProgram() {
       <input name="name" placeholder="${p.type === 'cardio' ? 'Ny økt, f.eks. «Intervalldag»' : 'Ny økt, f.eks. «Push dag»'}" required>
       <button class="primary">Legg til</button>
     </form>
+    ${freeStartHtml()}
     <div class="section"><button class="soft-danger big" data-action="delete-program">Slett program</button></div>`;
 }
 
@@ -835,7 +982,7 @@ function renderHistory() {
           <strong>${esc(h.workoutName)}</strong>
           <span class="badge">${h.type === 'cardio' ? 'Cardio' : 'Styrke'}</span>
         </div>
-        <div class="muted">${esc(h.programName)} · ${formatDate(h.startedAt)} · ${formatDuration(h.endedAt - h.startedAt)}</div>
+        <div class="muted">${[esc(h.programName), formatDate(h.startedAt), formatDuration(h.endedAt - h.startedAt)].filter(Boolean).join(' · ')}</div>
       </summary>
       ${h.exercises.map(ex => `
         <div class="history-ex">
@@ -861,7 +1008,7 @@ function renderHistoryEdit() {
   return `
     <button class="link" data-action="nav" data-view="history">‹ Historikk</button>
     <h1 style="margin-bottom:4px">Rediger økt</h1>
-    <div class="muted" style="margin-bottom:16px">${esc(d.workoutName)} · ${esc(d.programName)}</div>
+    <div class="muted" style="margin-bottom:16px">${[esc(d.workoutName), esc(d.programName)].filter(Boolean).join(' · ')}</div>
     <div class="card stack">
       <label class="field"><span class="muted small">Starttid</span>
         <input type="datetime-local" value="${esc(d._start)}" data-meta="_start"></label>
@@ -937,19 +1084,22 @@ function renderProfile() {
       </div>`).join('') || '<p class="empty">Ingen registreringer ennå.</p>'}`;
 }
 
-function renderSettings() {
-  const c = currentColors();
-  const { custom, activeSlot } = db.settings;
-  const same = colors => Object.keys(DEFAULT_COLORS).every(k => colors[k].toLowerCase() === c[k].toLowerCase());
-  const dots = colors => `<span class="dots"><span style="background:${colors.bg}"></span><span style="background:${colors.accent}"></span></span>`;
+const dots = colors => `<span class="dots"><span style="background:${colors.bg}"></span><span style="background:${colors.accent}"></span></span>`;
 
-  const themes = THEMES.map((t, i) => `
+function themesHtml() {
+  const c = currentColors();
+  const same = colors => Object.keys(DEFAULT_COLORS).every(k => colors[k].toLowerCase() === c[k].toLowerCase());
+  return THEMES.map((t, i) => `
     <button class="theme-btn" data-action="apply-theme" data-i="${i}"
-            style="background:${t.colors.card};color:${t.colors.text};${activeSlot === null && same(t.colors) ? `border-color:${c.accent}` : ''}">
+            style="background:${t.colors.card};color:${t.colors.text};${db.settings.activeSlot === null && same(t.colors) ? `border-color:${c.accent}` : ''}">
       ${dots(t.colors)}${t.name}
     </button>`).join('');
+}
 
-  const slots = custom.map((s, i) => s.colors ? `
+function slotsHtml() {
+  const c = currentColors();
+  const { custom, activeSlot } = db.settings;
+  return custom.map((s, i) => s.colors ? `
     <button class="theme-btn slot" data-action="apply-slot" data-i="${i}"
             style="background:${s.colors.card};color:${s.colors.text};${activeSlot === i ? `border-color:${c.accent}` : ''}">
       ${dots(s.colors)}${esc(s.name)}
@@ -959,7 +1109,11 @@ function renderSettings() {
       <span style="font-size:1.3rem">+</span>${esc(s.name)}
       <span class="small muted">Tomt – trykk for å lage</span>
     </button>`).join('');
+}
 
+function renderSettings() {
+  const c = currentColors();
+  const { custom, activeSlot } = db.settings;
   const fields = COLOR_FIELDS.map(([k, label]) => `
     <label class="color-row">
       <span>${label}</span>
@@ -983,9 +1137,9 @@ function renderSettings() {
     <button class="link" data-action="nav" data-view="profile">‹ Profil</button>
     <h1>Innstillinger</h1>
     <h2>Mine temaer</h2>
-    <div class="slots">${slots}</div>
+    <div class="slots" id="slots">${slotsHtml()}</div>
     <h2 class="section">Ferdige temaer</h2>
-    <div class="themes">${themes}</div>
+    <div class="themes" id="themes">${themesHtml()}</div>
     <h2 class="section">${editing ? `Rediger «${esc(editing.name)}»` : 'Egne farger'}</h2>
     ${header}
     <div class="card" style="padding-top:4px;padding-bottom:4px">${fields}</div>
@@ -1002,7 +1156,8 @@ function renderHeader() {
   const onSession = view.name === 'session';
   top.innerHTML = `
     <div class="timer-bar">
-      <span class="title">${esc(db.active.workoutName)}</span>
+      <span class="title">${esc(db.active.workoutName)}
+        ${db.active.intervalTimer ? '<span class="iv-header" id="iv-header"></span>' : ''}</span>
       <span class="row">
         <span class="time" id="timer">${formatDuration(Date.now() - db.active.startedAt)}</span>
         ${onSession ? '' : '<button data-action="nav" data-view="session">Til økt</button>'}
@@ -1045,6 +1200,7 @@ function tick() {
     const input = document.querySelector(`[data-scope="active"][data-i="${sw.i}"][data-s="${sw.s}"][data-field="time"]`);
     if (input) input.value = stopwatchSecs(sw);
   }
+  tickIntervalTimer();
 }
 setInterval(tick, 250);
 document.addEventListener('visibilitychange', tick);
@@ -1112,6 +1268,7 @@ const actions = {
     const p = getProgram(view.programId);
     const w = getWorkout(view.programId, view.workoutId);
     if (db.active && !await ask('Du har allerede en økt i gang', `Vil du avbryte «${db.active.workoutName}» og starte en ny?`, { ok: 'Start ny økt' })) return;
+    stopIntervalTimer();
     db.active = {
       type: p.type,
       programId: p.id,
@@ -1122,6 +1279,21 @@ const actions = {
       exercises: w.exerciseIds.map(sessionEx),
     };
     db.lastProgramByMode[p.type] = p.id;
+    save(); go({ name: 'session' });
+  },
+  // Økt uten program – øvelser legges til underveis
+  'start-free': async () => {
+    if (db.active && !await ask('Du har allerede en økt i gang', `Vil du avbryte «${db.active.workoutName}» og starte en ny?`, { ok: 'Start ny økt' })) return;
+    stopIntervalTimer();
+    db.active = {
+      type: mode(),
+      programId: null,
+      workoutId: null,
+      programName: '',
+      workoutName: mode() === 'cardio' ? 'Fri cardioøkt' : 'Fri styrkeøkt',
+      startedAt: Date.now(),
+      exercises: [],
+    };
     save(); go({ name: 'session' });
   },
   'add-set': d => {
@@ -1138,6 +1310,26 @@ const actions = {
     if (!same) db.active.stopwatch = { i: +d.i, s: +d.s, startedAt: Date.now() };
     save(); render();
   },
+  'iv-start': d => {
+    unlockAudio(); // må skje i selve trykket for at iPhone skal spille lyd
+    const ex = db.active.exercises[+d.i];
+    const cfg = ex.timer ?? timerDefaults(ex);
+    const work = parseDuration(cfg.work), rest = parseDuration(cfg.rest), rounds = parseInt(cfg.rounds, 10) || 0;
+    if (!work || !rounds) { notice('Mangler tid', 'Fyll inn hvor lenge hvert drag varer og antall drag.'); return; }
+    stopStopwatch();
+    // Sørg for ett intervall per drag, og fyll inn tid der det mangler
+    while (ex.sets.length < rounds) {
+      const prev = ex.sets[ex.sets.length - 1];
+      ex.sets.push(prev ? { ...prev } : emptySetFor(ex));
+    }
+    ex.sets.slice(0, rounds).forEach(s => { if (!s.duration) s.duration = cfg.work; });
+    lastPhaseKey = lastTickKey = null;
+    db.active.intervalTimer = { i: +d.i, work, rest, rounds, startedAt: Date.now() };
+    keepAwake(true);
+    SOUNDS.tick();
+    save(); render();
+  },
+  'iv-stop': () => { stopIntervalTimer(); save(); render(); },
   'remove-set': d => {
     if (d.scope === 'active') stopStopwatch(); // indekser kan endre seg
     setTarget(d.scope).exercises[+d.i].sets.splice(+d.s, 1);
@@ -1150,7 +1342,7 @@ const actions = {
     // Spør bare hvis det er logget noe på øvelsen
     if (ex.sets.some(hasData) &&
         !await ask(`Fjerne «${ex.name}»?`, 'Det du har logget på denne øvelsen forsvinner.', { ok: 'Fjern øvelse' })) return;
-    if (d.scope === 'active') stopStopwatch();
+    if (d.scope === 'active') { stopStopwatch(); stopIntervalTimer(); }
     list.splice(+d.i, 1);
     if (d.scope === 'active') save();
     render();
@@ -1158,6 +1350,7 @@ const actions = {
   'finish-session': async () => {
     if (!await ask('Fullføre økta?', 'Økta lagres i historikken.', { ok: 'Fullfør økt', danger: false })) return;
     stopStopwatch();
+    stopIntervalTimer();
     const a = db.active;
     // Spør om endringer i øvelsene skal lagres permanent i økta
     const w = getWorkout(a.programId, a.workoutId);
@@ -1190,6 +1383,7 @@ const actions = {
   },
   'cancel-session': async () => {
     if (!await ask('Avbryte økta?', 'Det du har logget blir ikke lagret.', { ok: 'Avbryt økt', cancel: 'Fortsett økta' })) return;
+    stopIntervalTimer();
     db.active = null;
     save(); go(homeProgramView());
   },
@@ -1304,6 +1498,13 @@ const forms = {
   },
 };
 
+// Går intervall-timeren (f.eks. etter at appen ble åpnet igjen), låses lyden opp ved første trykk
+document.addEventListener('touchstart', () => { if (db.active?.intervalTimer) unlockAudio(); }, { passive: true });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && db.active?.intervalTimer) keepAwake(true);
+  else wakeLock = null; // iOS slipper skjermlåsen når appen skjules
+});
+
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-action]');
   if (!el || el.disabled) return;
@@ -1338,10 +1539,17 @@ document.addEventListener('input', e => {
   // Redigerer man et eget tema, lagres endringen i det temaet
   if (s.activeSlot !== null) s.custom[s.activeSlot].colors = { ...currentColors() };
   applyTheme(); save();
+  refreshThemePreviews();
 });
+// NB: Ikke rendre hele siden på nytt her – da lukkes fargevelgeren på iPhone midt i justeringen.
 document.addEventListener('change', e => {
-  if (e.target.dataset?.color || e.target.matches('[data-theme-name]')) render();
+  if (e.target.dataset?.color || e.target.matches('[data-theme-name]')) refreshThemePreviews();
 });
+function refreshThemePreviews() {
+  const slots = document.getElementById('slots'), themes = document.getElementById('themes');
+  if (slots) slots.innerHTML = slotsHtml();
+  if (themes) themes.innerHTML = themesHtml();
+}
 
 // Vis riktige under-muskelgrupper når muskelgruppe velges
 document.addEventListener('change', e => {
@@ -1396,6 +1604,15 @@ document.addEventListener('input', e => {
   if (el.dataset.meta && editDraft) {
     if (el.dataset.meta === '_minutes') el.value = el.value.replace(/[^0-9]/g, '');
     editDraft[el.dataset.meta] = el.value;
+    return;
+  }
+  // Oppsett av intervall-timer
+  if (el.dataset.timer && db.active) {
+    el.value = el.value.replace(el.dataset.timer === 'rounds' ? /[^0-9]/g : /[^0-9:.,]/g, '');
+    const ex = db.active.exercises[+el.dataset.i];
+    ex.timer ??= timerDefaults(ex);
+    ex.timer[el.dataset.timer] = el.value;
+    save();
     return;
   }
   // Sett-verdier lagres fortløpende uten å rendre på nytt (beholder fokus i feltet)

@@ -7,6 +7,9 @@
   --accent: #22c55e;
   --accent-dark: #16a34a;
   --danger: #ef4444;
+  --on-accent: #052e16;       /* tekst på aksentfarge (settes av appen) */
+  --on-accent-dark: #ffffff;  /* tekst på timerlinja */
+  --raised: #273449;          /* ark og hover, litt lysere enn kort */
 }
 
 * { box-sizing: border-box; }
@@ -40,17 +43,17 @@ h3 { font-size: 1.05rem; margin: 0 0 6px; }
 /* Holder innholdet unna Dynamic Island / statuslinja på iPhone */
 #top {
   position: sticky; top: 0; z-index: 10;
-  background: var(--bg);
+  background: var(--top-bg, var(--bg));
   padding-top: env(safe-area-inset-top);
 }
 #top.has-timer { background: var(--accent-dark); box-shadow: 0 2px 8px rgba(0,0,0,.4); }
 .timer-bar {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  color: #fff; padding: 12px 16px;
+  color: var(--on-accent-dark); padding: 12px 16px;
 }
 .timer-bar .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .timer-bar .time { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-.timer-bar button { background: rgba(0,0,0,.25); color: #fff; }
+.timer-bar button { background: rgba(0,0,0,.25); color: var(--on-accent-dark); }
 
 /* Bottom nav */
 #nav {
@@ -68,7 +71,7 @@ button {
   font: inherit; border: none; border-radius: 10px; padding: 10px 14px;
   background: var(--line); color: var(--text); cursor: pointer;
 }
-button.primary { background: var(--accent); color: #052e16; font-weight: 700; }
+button.primary { background: var(--accent); color: var(--on-accent); font-weight: 700; }
 button.danger { background: transparent; color: var(--danger); }
 button.big { width: 100%; padding: 14px; font-size: 1.05rem; }
 button.link { background: none; padding: 6px 0; color: var(--muted); }
@@ -88,7 +91,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); border-color: tran
   background: var(--card); border-radius: 12px; padding: 14px; margin-bottom: 8px;
 }
 .list-item.clickable { cursor: pointer; }
-.list-item.clickable:hover { background: #253349; }
+.list-item.clickable:hover { background: var(--raised); }
 .muted { color: var(--muted); font-size: .9rem; }
 .empty { color: var(--muted); text-align: center; padding: 24px 0; }
 .stack > * + * { margin-top: 10px; }
@@ -117,7 +120,7 @@ input[type="datetime-local"] { min-height: 44px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .chip { padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); cursor: pointer; user-select: none; -webkit-user-select: none; }
 .chip input { display: none; }
-.chip:has(input:checked) { background: var(--accent); border-color: var(--accent); color: #052e16; font-weight: 600; }
+.chip:has(input:checked) { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
 
 /* Kategorigrupper i biblioteket */
 .group { background: var(--card); border-radius: 12px; margin-bottom: 8px; }
@@ -162,7 +165,7 @@ input.switch:focus { outline: none; }
 
 /* Stoppeklokke på sett */
 .set-grid.timed { grid-template-columns: 32px 1fr 1fr 44px 36px; }
-.sw-btn { padding: 8px 0; background: var(--accent); color: #052e16; font-weight: 700; }
+.sw-btn { padding: 8px 0; background: var(--accent); color: var(--on-accent); font-weight: 700; }
 .sw-btn.running { background: var(--danger); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
 input.running { border-color: var(--danger); color: var(--danger); font-weight: 700; }
 @keyframes pulse { 50% { opacity: .65; } }
@@ -178,14 +181,14 @@ input[type="search"] { -webkit-appearance: none; appearance: none; }
 .grow { flex: 1; min-width: 0; }
 .row.tight { gap: 6px; flex: none; }
 .row.tight button { padding: 8px 10px; }
-button.remove { background: rgba(239, 68, 68, .15); color: var(--danger); font-weight: 600; }
+button.remove { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); font-weight: 600; }
 
 /* Kroppsvektgraf */
 .chart { width: 100%; height: auto; display: block; }
 
 /* Myke sletteknapper */
-button.soft-danger { background: rgba(239, 68, 68, .12); color: var(--danger); font-weight: 600; }
-button.soft-danger:active { background: rgba(239, 68, 68, .22); }
+button.soft-danger { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); font-weight: 600; }
+button.soft-danger:active { background: color-mix(in srgb, var(--danger) 22%, transparent); }
 
 /* Bekreftelsesark (iOS action sheet) */
 .sheet-backdrop {
@@ -201,7 +204,7 @@ button.soft-danger:active { background: rgba(239, 68, 68, .22); }
 }
 .sheet-backdrop.open .sheet { transform: translateY(0); }
 .sheet-group, .sheet-btn.cancel {
-  background: #273449; border-radius: 14px; overflow: hidden;
+  background: var(--raised); border-radius: 14px; overflow: hidden;
 }
 .sheet-msg {
   padding: 16px 20px; text-align: center; border-bottom: 1px solid var(--line);
@@ -216,6 +219,28 @@ button.soft-danger:active { background: rgba(239, 68, 68, .22); }
 .sheet-btn.danger { color: var(--danger); }
 .sheet-btn:active { background: rgba(255, 255, 255, .06); }
 .sheet-btn.cancel { margin-top: 8px; color: var(--text); font-weight: 700; }
+
+/* Innstillinger: farger */
+.color-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 0; border-bottom: 1px solid var(--line);
+}
+.color-row:last-child { border-bottom: none; }
+.color-row input[type="color"] {
+  -webkit-appearance: none; appearance: none; flex: none;
+  width: 44px; height: 32px; padding: 0; border: 2px solid var(--line); border-radius: 8px;
+  background: none; cursor: pointer;
+}
+.color-row input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.color-row input[type="color"]::-webkit-color-swatch { border: none; border-radius: 6px; }
+.themes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.theme-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 10px 4px; font-size: .85rem; border: 2px solid transparent;
+}
+.theme-btn .dots { display: flex; }
+.theme-btn .dots span { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--card); margin-left: -5px; }
+.theme-btn .dots span:first-child { margin-left: 0; }
 
 details summary { cursor: pointer; list-style: none; }
 details summary::-webkit-details-marker { display: none; }

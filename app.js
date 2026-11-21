@@ -45,7 +45,64 @@ db.exercises.forEach(e => { e.category ??= ''; e.subs ??= []; e.equipment ??= ''
 db.lastProgramId ??= null;
 db.bodyweight ??= [];
 
+db.settings ??= { colors: {} };
+
 const save = () => localStorage.setItem(STORE_KEY, JSON.stringify(db));
+
+// ---------- Farger / tema ----------
+
+const DEFAULT_COLORS = {
+  accent: '#22c55e', bg: '#0f172a', card: '#1e293b', text: '#e2e8f0',
+  muted: '#94a3b8', line: '#334155', danger: '#ef4444',
+};
+
+const COLOR_FIELDS = [
+  ['accent', 'Aksentfarge (knapper, timer)'],
+  ['bg', 'Bakgrunn'],
+  ['card', 'Kort'],
+  ['text', 'Tekst'],
+  ['muted', 'Sekundærtekst'],
+  ['line', 'Kanter og knapper'],
+  ['danger', 'Slett / fare'],
+];
+
+const THEMES = [
+  { name: 'Standard', colors: DEFAULT_COLORS },
+  { name: 'Blå',      colors: { ...DEFAULT_COLORS, accent: '#3b82f6' } },
+  { name: 'Lilla',    colors: { ...DEFAULT_COLORS, accent: '#a855f7' } },
+  { name: 'Oransje',  colors: { ...DEFAULT_COLORS, accent: '#f97316' } },
+  { name: 'Rosa',     colors: { ...DEFAULT_COLORS, accent: '#ec4899' } },
+  { name: 'Gul',      colors: { ...DEFAULT_COLORS, accent: '#eab308' } },
+  { name: 'Svart',    colors: { accent: '#30d158', bg: '#000000', card: '#1c1c1e', text: '#f2f2f7', muted: '#8e8e93', line: '#3a3a3c', danger: '#ff453a' } },
+  { name: 'Lys',      colors: { accent: '#16a34a', bg: '#f1f5f9', card: '#ffffff', text: '#0f172a', muted: '#64748b', line: '#cbd5e1', danger: '#dc2626' } },
+];
+
+const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const rgbHex = a => '#' + a.map(v => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
+const mixHex = (a, b, t) => { const x = hexRgb(a), y = hexRgb(b); return rgbHex(x.map((v, i) => v + (y[i] - v) * t)); };
+const lum = h => {
+  const [r, g, b] = hexRgb(h).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+
+const currentColors = () => ({ ...DEFAULT_COLORS, ...db.settings.colors });
+
+function applyTheme() {
+  const c = currentColors();
+  const root = document.documentElement.style;
+  Object.entries(c).forEach(([k, v]) => root.setProperty(`--${k}`, v));
+  const accentDark = mixHex(c.accent, '#000000', 0.2);
+  const light = lum(c.bg) > 0.4;
+  root.setProperty('--accent-dark', accentDark);
+  // Lesbar tekst oppå aksentfargen: mørk på lyse farger, hvit på mørke
+  root.setProperty('--on-accent', lum(c.accent) > 0.3 ? mixHex(c.accent, '#000000', 0.8) : '#ffffff');
+  root.setProperty('--on-accent-dark', lum(accentDark) > 0.4 ? mixHex(c.accent, '#000000', 0.85) : '#ffffff');
+  root.setProperty('--raised', mixHex(c.card, c.text, 0.08));
+  // iPhone-statuslinja har alltid hvit tekst – gi den mørk bakgrunn på lyse temaer
+  root.setProperty('--top-bg', light ? c.text : c.bg);
+  root.colorScheme = light ? 'light' : 'dark';
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', c.bg);
+}
 
 let view;              // hvilken side som vises
 let editDraft = null;  // kopi av fullført økt som redigeres
@@ -585,6 +642,9 @@ function renderProfile() {
     <div class="list-item clickable" data-action="nav" data-view="stats">
       <strong>📊 Statistikk muskelgrupper</strong><span class="muted">›</span>
     </div>
+    <div class="list-item clickable" data-action="nav" data-view="settings">
+      <strong>⚙️ Innstillinger</strong><span class="muted">›</span>
+    </div>
     <h2 class="section">Kroppsvekt</h2>
     ${latest ? `
       <div class="stat-grid">
@@ -609,6 +669,32 @@ function renderProfile() {
       </div>`).join('') || '<p class="empty">Ingen registreringer ennå.</p>'}`;
 }
 
+function renderSettings() {
+  const c = currentColors();
+  const same = t => Object.keys(DEFAULT_COLORS).every(k => t.colors[k].toLowerCase() === c[k].toLowerCase());
+  const themes = THEMES.map((t, i) => `
+    <button class="theme-btn" data-action="apply-theme" data-i="${i}"
+            style="background:${t.colors.card};color:${t.colors.text};${same(t) ? `border-color:${c.accent}` : ''}">
+      <span class="dots"><span style="background:${t.colors.bg}"></span><span style="background:${t.colors.accent}"></span></span>
+      ${t.name}
+    </button>`).join('');
+  const fields = COLOR_FIELDS.map(([k, label]) => `
+    <label class="color-row">
+      <span>${label}</span>
+      <input type="color" value="${c[k]}" data-color="${k}">
+    </label>`).join('');
+  return `
+    <button class="link" data-action="nav" data-view="profile">‹ Profil</button>
+    <h1>Innstillinger</h1>
+    <h2>Temaer</h2>
+    <div class="themes">${themes}</div>
+    <h2 class="section">Egne farger</h2>
+    <div class="card" style="padding-top:4px;padding-bottom:4px">${fields}</div>
+    <div class="section">
+      <button class="soft-danger big" data-action="reset-colors">Tilbakestill farger</button>
+    </div>`;
+}
+
 function renderHeader() {
   const top = document.getElementById('top');
   top.classList.toggle('has-timer', !!db.active);
@@ -628,10 +714,10 @@ const VIEWS = {
   programs: renderPrograms, program: renderProgram, workout: renderWorkout,
   library: renderLibrary, exercise: renderExercise, stats: renderStats,
   session: renderSession, history: renderHistory, historyEdit: renderHistoryEdit,
-  profile: renderProfile,
+  profile: renderProfile, settings: renderSettings,
 };
 
-const TAB_OF = { program: 'programs', workout: 'programs', exercise: 'library', stats: 'profile', historyEdit: 'history' };
+const TAB_OF = { program: 'programs', workout: 'programs', exercise: 'library', stats: 'profile', settings: 'profile', historyEdit: 'history' };
 
 function render() {
   const html = VIEWS[view.name]();
@@ -819,6 +905,15 @@ const actions = {
     db.history = db.history.filter(h => h.id !== d.id);
     save(); render();
   },
+  'apply-theme': d => {
+    db.settings.colors = { ...THEMES[+d.i].colors };
+    applyTheme(); save(); render();
+  },
+  'reset-colors': async () => {
+    if (!await ask('Tilbakestille farger?', 'Alle farger settes tilbake til standard.', { ok: 'Tilbakestill' })) return;
+    db.settings.colors = {};
+    applyTheme(); save(); render();
+  },
   'delete-bw': async d => {
     const e = db.bodyweight.find(x => x.id === d.id);
     if (!await ask('Slette registreringen?', `${fmt(num(e.kg))} kg – ${formatDay(e.date)}`, { ok: 'Slett' })) return;
@@ -892,6 +987,17 @@ document.addEventListener('submit', e => {
   save(); render();
 });
 
+// Fargevelger: oppdater live mens man velger, og marker riktig tema når man er ferdig
+document.addEventListener('input', e => {
+  const key = e.target.dataset?.color;
+  if (!key) return;
+  db.settings.colors[key] = e.target.value;
+  applyTheme(); save();
+});
+document.addEventListener('change', e => {
+  if (e.target.dataset?.color) render();
+});
+
 // Vis riktige under-muskelgrupper når muskelgruppe velges
 document.addEventListener('change', e => {
   if (e.target.name !== 'category') return;
@@ -956,5 +1062,6 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 }
 navigator.storage?.persist?.().catch(() => {});
 
+applyTheme();
 view = db.active ? { name: 'session' } : homeProgramView();
 render();

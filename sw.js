@@ -1,6 +1,6 @@
 // Service worker: gjør at appen fungerer uten nett (f.eks. i kjelleren på treningssenteret).
 // Øk versjonsnummeret når filene endres, så telefonen henter nye versjoner.
-const CACHE = 'treningsapp-v8';
+const CACHE = 'treningsapp-v9';
 const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {

@@ -234,6 +234,10 @@ button.soft-danger:active { background: color-mix(in srgb, var(--danger) 22%, tr
 .color-row input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
 .color-row input[type="color"]::-webkit-color-swatch { border: none; border-radius: 6px; }
 .themes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.slots { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.theme-btn.slot { padding: 14px 6px; font-weight: 600; font-size: .95rem; }
+.theme-btn.slot .small { font-weight: 400; }
+.theme-btn.empty { background: transparent; border: 2px dashed var(--line); color: var(--text); }
 .theme-btn {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   padding: 10px 4px; font-size: .85rem; border: 2px solid transparent;

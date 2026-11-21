@@ -46,6 +46,9 @@ db.lastProgramId ??= null;
 db.bodyweight ??= [];
 
 db.settings ??= { colors: {} };
+// To egne temaer som kan lagres og justeres. activeSlot = indeks på eget tema som er i bruk (eller null)
+db.settings.custom ??= [{ name: 'Mitt tema 1', colors: null }, { name: 'Mitt tema 2', colors: null }];
+db.settings.activeSlot ??= null;
 
 const save = () => localStorage.setItem(STORE_KEY, JSON.stringify(db));
 
@@ -671,25 +674,57 @@ function renderProfile() {
 
 function renderSettings() {
   const c = currentColors();
-  const same = t => Object.keys(DEFAULT_COLORS).every(k => t.colors[k].toLowerCase() === c[k].toLowerCase());
+  const { custom, activeSlot } = db.settings;
+  const same = colors => Object.keys(DEFAULT_COLORS).every(k => colors[k].toLowerCase() === c[k].toLowerCase());
+  const dots = colors => `<span class="dots"><span style="background:${colors.bg}"></span><span style="background:${colors.accent}"></span></span>`;
+
   const themes = THEMES.map((t, i) => `
     <button class="theme-btn" data-action="apply-theme" data-i="${i}"
-            style="background:${t.colors.card};color:${t.colors.text};${same(t) ? `border-color:${c.accent}` : ''}">
-      <span class="dots"><span style="background:${t.colors.bg}"></span><span style="background:${t.colors.accent}"></span></span>
-      ${t.name}
+            style="background:${t.colors.card};color:${t.colors.text};${activeSlot === null && same(t.colors) ? `border-color:${c.accent}` : ''}">
+      ${dots(t.colors)}${t.name}
     </button>`).join('');
+
+  const slots = custom.map((s, i) => s.colors ? `
+    <button class="theme-btn slot" data-action="apply-slot" data-i="${i}"
+            style="background:${s.colors.card};color:${s.colors.text};${activeSlot === i ? `border-color:${c.accent}` : ''}">
+      ${dots(s.colors)}${esc(s.name)}
+      ${activeSlot === i ? '<span class="small" style="opacity:.7">I bruk – redigeres under</span>' : ''}
+    </button>` : `
+    <button class="theme-btn slot empty" data-action="apply-slot" data-i="${i}">
+      <span style="font-size:1.3rem">+</span>${esc(s.name)}
+      <span class="small muted">Tomt – trykk for å lage</span>
+    </button>`).join('');
+
   const fields = COLOR_FIELDS.map(([k, label]) => `
     <label class="color-row">
       <span>${label}</span>
       <input type="color" value="${c[k]}" data-color="${k}">
     </label>`).join('');
+
+  const editing = activeSlot !== null ? custom[activeSlot] : null;
+  const header = editing
+    ? `<div class="card stack">
+         <label class="field"><span class="muted small">Navn på tema</span>
+           <input type="text" value="${esc(editing.name)}" maxlength="20" data-theme-name></label>
+         <div class="muted small">Endringer i fargene under lagres automatisk i dette temaet.</div>
+       </div>`
+    : `<p class="muted small" style="margin-top:0">Juster fargene og lagre dem som ett av dine egne temaer.</p>`;
+  const saveButtons = editing ? '' : `
+    <div class="row section">
+      ${custom.map((s, i) => `<button class="grow" data-action="save-slot" data-i="${i}">Lagre som «${esc(s.name)}»</button>`).join('')}
+    </div>`;
+
   return `
     <button class="link" data-action="nav" data-view="profile">‹ Profil</button>
     <h1>Innstillinger</h1>
-    <h2>Temaer</h2>
+    <h2>Mine temaer</h2>
+    <div class="slots">${slots}</div>
+    <h2 class="section">Ferdige temaer</h2>
     <div class="themes">${themes}</div>
-    <h2 class="section">Egne farger</h2>
+    <h2 class="section">${editing ? `Rediger «${esc(editing.name)}»` : 'Egne farger'}</h2>
+    ${header}
     <div class="card" style="padding-top:4px;padding-bottom:4px">${fields}</div>
+    ${saveButtons}
     <div class="section">
       <button class="soft-danger big" data-action="reset-colors">Tilbakestill farger</button>
     </div>`;
@@ -907,11 +942,27 @@ const actions = {
   },
   'apply-theme': d => {
     db.settings.colors = { ...THEMES[+d.i].colors };
+    db.settings.activeSlot = null;
     applyTheme(); save(); render();
   },
+  'apply-slot': d => {
+    const slot = db.settings.custom[+d.i];
+    slot.colors ??= { ...currentColors() }; // tomt tema starter med fargene du har nå
+    db.settings.colors = { ...slot.colors };
+    db.settings.activeSlot = +d.i;
+    applyTheme(); save(); render();
+  },
+  'save-slot': async d => {
+    const slot = db.settings.custom[+d.i];
+    if (slot.colors && !await ask(`Overskrive «${slot.name}»?`, 'Temaet erstattes med fargene du har valgt nå.', { ok: 'Overskriv', danger: false })) return;
+    slot.colors = { ...currentColors() };
+    db.settings.activeSlot = +d.i;
+    save(); render();
+  },
   'reset-colors': async () => {
-    if (!await ask('Tilbakestille farger?', 'Alle farger settes tilbake til standard.', { ok: 'Tilbakestill' })) return;
+    if (!await ask('Tilbakestille farger?', 'Appen går tilbake til standardfargene. Dine egne temaer beholdes.', { ok: 'Tilbakestill' })) return;
     db.settings.colors = {};
+    db.settings.activeSlot = null;
     applyTheme(); save(); render();
   },
   'delete-bw': async d => {
@@ -989,13 +1040,21 @@ document.addEventListener('submit', e => {
 
 // Fargevelger: oppdater live mens man velger, og marker riktig tema når man er ferdig
 document.addEventListener('input', e => {
+  const s = db.settings;
+  if (e.target.matches('[data-theme-name]')) {
+    if (s.activeSlot !== null) s.custom[s.activeSlot].name = e.target.value.trim() || `Mitt tema ${s.activeSlot + 1}`;
+    save();
+    return;
+  }
   const key = e.target.dataset?.color;
   if (!key) return;
-  db.settings.colors[key] = e.target.value;
+  s.colors[key] = e.target.value;
+  // Redigerer man et eget tema, lagres endringen i det temaet
+  if (s.activeSlot !== null) s.custom[s.activeSlot].colors = { ...currentColors() };
   applyTheme(); save();
 });
 document.addEventListener('change', e => {
-  if (e.target.dataset?.color) render();
+  if (e.target.dataset?.color || e.target.matches('[data-theme-name]')) render();
 });
 
 // Vis riktige under-muskelgrupper når muskelgruppe velges

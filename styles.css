@@ -83,6 +83,11 @@ h3 { font-size: 1.05rem; margin: 0 0 6px; }
 #nav button.active svg { stroke-width: 2.3; }
 #nav button:active .ico { transform: scale(.92); }
 
+.theme-ico svg {
+  width: 26px; height: 26px; fill: none; stroke: currentColor;
+  stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; display: block;
+}
+
 /* Opprett ny øvelse (sammenleggbar) */
 .new-ex summary { display: flex; justify-content: space-between; align-items: center; cursor: pointer; list-style: none; }
 .new-ex summary::-webkit-details-marker { display: none; }

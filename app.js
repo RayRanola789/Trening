@@ -110,7 +110,38 @@ const THEMES = [
   { name: 'Skog',     colors: { accent: '#a3e635', bg: '#0a1a10', card: '#13291b', text: '#ecfccb', muted: '#8fae96', line: '#244030', danger: '#f87171' } },
   { name: 'Svart',    colors: { accent: '#ffd60a', bg: '#000000', card: '#1c1c1e', text: '#f2f2f7', muted: '#8e8e93', line: '#3a3a3c', danger: '#ff453a' } },
   { name: 'Lys',      colors: { accent: '#2563eb', bg: '#f1f5f9', card: '#ffffff', text: '#0f172a', muted: '#64748b', line: '#cbd5e1', danger: '#dc2626' } },
+  // Heltetemaer – bytter også profilikonet nederst
+  { name: 'Batman',    icon: 'batman',    colors: { accent: '#b3121b', bg: '#09090b', card: '#18181c', text: '#e4e4e7', muted: '#8b8b96', line: '#2c2c33', danger: '#f87171' } },
+  { name: 'Supermann', icon: 'supermann', colors: { accent: '#e8262b', bg: '#071338', card: '#11225c', text: '#eef3ff', muted: '#9cafe0', line: '#22397f', danger: '#ff8a3d' } },
+  { name: 'Spiderman', icon: 'spiderman', colors: { accent: '#3b82f6', bg: '#170408', card: '#2b0a10', text: '#fde8ea', muted: '#c78f96', line: '#4d1822', danger: '#f87171' } },
+  { name: 'Hulk',      icon: 'hulk',      colors: { accent: '#5fd12e', bg: '#0b170c', card: '#162d19', text: '#eaffdf', muted: '#93b88a', line: '#28492d', danger: '#f87171' } },
 ];
+
+// Hodeikoner for heltetemaene (samme strekstil som resten av menyen)
+const HERO_ICONS = {
+  // Kun masken
+  batman: `<svg viewBox="0 0 24 24">
+    <path d="M4.6 21.5V6.4l.5-5 3.1 4.2c2.5-.7 5.1-.7 7.6 0l3.1-4.2.5 5v15.1l-2.7-7.8L12 16.4l-4.7-2.7z"/>
+    <path d="M8.1 10.4l2.5 1M15.9 10.4l-2.5 1"/></svg>`,
+  // Skjold med S
+  supermann: `<svg viewBox="0 0 24 24">
+    <path d="M2.8 8.6L6.8 4h10.4l4 4.6L12 20.5z" fill="#facc15"/>
+    <path d="M16.2 6.6H9.9c-2.6 0-2.7 3.9 0 3.9h3.6c2.4 0 2.4 3.4.1 3.6l-3.3.2"/></svg>`,
+  // Edderkoppen på drakta
+  spiderman: `<svg viewBox="0 0 24 24">
+    <ellipse cx="12" cy="8.2" rx="1.5" ry="1.8"/>
+    <ellipse cx="12" cy="13.6" rx="2" ry="3.4"/>
+    <path d="M10.6 9.2L7.6 6.2 7 3M10.4 11.2L5.6 9.8 3.6 6.8M10.2 14.2l-4.6 1.4-2 3.2M10.6 16.2l-3 2.8L7 21.5"/>
+    <path d="M13.4 9.2l3-3 .6-3.2M13.6 11.2l4.8-1.4 2-3M13.8 14.2l4.6 1.4 2 3.2M13.4 16.2l3 2.8.6 2.5"/></svg>`,
+  // Knyttet neve
+  hulk: `<svg viewBox="0 0 24 24">
+    <path d="M5 10V7.8a1.75 1.75 0 0 1 3.5 0V10"/>
+    <path d="M8.5 9.5V6.8a1.75 1.75 0 0 1 3.5 0V10"/>
+    <path d="M12 10V7.3a1.75 1.75 0 0 1 3.5 0V10.5"/>
+    <path d="M15.5 10.5V8.8a1.75 1.75 0 0 1 3.5 0v4.4c0 4.2-2.8 7.3-7 7.3h-1c-3.7 0-6-2.7-6-6.5V10"/>
+    <path d="M5 12.2h6a1.8 1.8 0 0 1 0 3.6H8.2"/></svg>`,
+};
+const DEFAULT_PROFILE_ICON = document.querySelector('#nav [data-view="profile"] .ico')?.innerHTML ?? '';
 
 const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 const rgbHex = a => '#' + a.map(v => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
@@ -137,6 +168,11 @@ function applyTheme() {
   root.setProperty('--top-bg', light ? c.text : c.bg);
   root.colorScheme = light ? 'light' : 'dark';
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', c.bg);
+  // Heltetema i bruk? Bytt profilikonet
+  const same = t => Object.keys(DEFAULT_COLORS).every(k => t.colors[k].toLowerCase() === c[k].toLowerCase());
+  const hero = THEMES.find(t => t.icon && same(t));
+  const ico = document.querySelector('#nav [data-view="profile"] .ico');
+  if (ico) ico.innerHTML = hero ? HERO_ICONS[hero.icon] : DEFAULT_PROFILE_ICON;
 }
 
 let view;              // hvilken side som vises
@@ -1094,7 +1130,7 @@ function themesHtml() {
   return THEMES.map((t, i) => `
     <button class="theme-btn" data-action="apply-theme" data-i="${i}"
             style="background:${t.colors.card};color:${t.colors.text};${db.settings.activeSlot === null && same(t.colors) ? `border-color:${c.accent}` : ''}">
-      ${dots(t.colors)}${t.name}
+      ${t.icon ? `<span class="theme-ico" style="color:${t.colors.accent}">${HERO_ICONS[t.icon]}</span>` : dots(t.colors)}${t.name}
     </button>`).join('');
 }
 

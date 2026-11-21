@@ -83,6 +83,13 @@ h3 { font-size: 1.05rem; margin: 0 0 6px; }
 #nav button.active svg { stroke-width: 2.3; }
 #nav button:active .ico { transform: scale(.92); }
 
+/* Opprett ny øvelse (sammenleggbar) */
+.new-ex summary { display: flex; justify-content: space-between; align-items: center; cursor: pointer; list-style: none; }
+.new-ex summary::-webkit-details-marker { display: none; }
+.new-ex summary strong { color: var(--accent); }
+.new-ex .chev { color: var(--muted); font-size: 1.3rem; line-height: 1; transition: transform .2s; }
+.new-ex[open] .chev { transform: rotate(90deg); }
+
 /* Start fri økt */
 .free-start {
   width: 100%; display: flex; align-items: center; gap: 14px; text-align: left;

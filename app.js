@@ -142,6 +142,7 @@ function applyTheme() {
 let view;              // hvilken side som vises
 let editDraft = null;  // kopi av fullført økt som redigeres
 let libQuery = '';     // søk i biblioteket
+let newExOpen = false; // «Opprett ny øvelse» er lukket til vanlig
 let historyFilter = 'alle';
 const statsState = { type: null, period: 'all', days: '' };
 const openCats = new Set(); // åpne grupper i biblioteket
@@ -636,11 +637,11 @@ function renderPrograms() {
   return `
     ${modeSwitch()}
     <h1>${cardio ? 'Cardioprogram' : 'Styrkeprogram'}</h1>
-    ${items || '<p class="empty">Ingen program ennå. Opprett ditt første under.</p>'}
-    <form class="row section" data-form="new-program">
+    <form class="row" data-form="new-program" style="margin-bottom:16px">
       <input name="name" placeholder="${cardio ? 'Nytt program, f.eks. «Løpeplan»' : 'Nytt program, f.eks. «Push/Pull/Legs»'}" required>
       <button class="primary">Legg til</button>
     </form>
+    ${items || '<p class="empty">Ingen program ennå. Opprett ditt første over.</p>'}
     ${freeStartHtml()}`;
 }
 
@@ -736,11 +737,13 @@ function renderLibrary() {
   return `
     ${modeSwitch()}
     <h1>${cardio ? 'Cardioøvelser' : 'Styrkeøvelser'}</h1>
-    <form class="card stack" data-form="new-exercise">
-      <strong>Ny øvelse</strong>
-      ${exerciseFormFields({}, mode())}
-      <button class="primary">Legg til</button>
-    </form>
+    <details class="card new-ex" data-newex ${newExOpen ? 'open' : ''}>
+      <summary><strong>＋ Opprett ny øvelse</strong><span class="chev">›</span></summary>
+      <form class="stack" data-form="new-exercise" style="margin-top:12px">
+        ${exerciseFormFields({}, mode())}
+        <button class="primary">Legg til</button>
+      </form>
+    </details>
     <h2 class="section">Øvelsesbibliotek</h2>
     <input type="search" placeholder="🔍 Søk i biblioteket…" autocomplete="off" data-lib-search value="${esc(libQuery)}" style="margin-bottom:10px">
     <div id="lib-groups">${libraryGroupsHtml()}</div>`;
@@ -1209,6 +1212,7 @@ document.addEventListener('visibilitychange', tick);
 const actions = {
   'nav': d => {
     if (d.view === 'stats') statsState.type = null; // start på valgt modus
+    if (d.view === 'library') newExOpen = false;
     go(d.view === 'programs' ? homeProgramView() : { name: d.view });
   },
   'set-mode': d => {
@@ -1559,6 +1563,7 @@ document.addEventListener('change', e => {
 
 // Husk hvilke grupper som er åpne i biblioteket
 document.addEventListener('toggle', e => {
+  if (e.target.matches?.('[data-newex]')) { newExOpen = e.target.open; return; }
   const cat = e.target.dataset?.cat;
   if (cat === undefined) return;
   e.target.open ? openCats.add(cat) : openCats.delete(cat);

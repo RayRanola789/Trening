@@ -3,6 +3,7 @@
 
 const STORE_KEY = 'treningsapp-v1';
 
+// Muskelgrupper (lagres i feltet "category" på øvelsen)
 const CATEGORIES = [
   { id: 'armer',   name: 'Armer',   subs: ['Bicep', 'Tricep', 'Forearm'] },
   { id: 'rygg',    name: 'Rygg',    subs: ['Lats', 'Traps', 'Lower back'] },
@@ -10,6 +11,15 @@ const CATEGORIES = [
   { id: 'skuldre', name: 'Skuldre', subs: ['Front', 'Lateral', 'Rear'] },
   { id: 'bein',    name: 'Bein',    subs: ['Quads', 'Hamstring', 'Calf'] },
   { id: 'mage',    name: 'Mage',    subs: [] },
+];
+
+// Kategori = type utstyr (lagres i feltet "equipment")
+const EQUIPMENT = [
+  { id: 'maskin',   name: 'Maskin' },
+  { id: 'barbell',  name: 'Barbell' },
+  { id: 'dumbbell', name: 'Dumbbell' },
+  { id: 'cable',    name: 'Cable' },
+  { id: 'annet',    name: 'Annet' },
 ];
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -20,24 +30,27 @@ function load() {
     if (data) return data;
   } catch (e) { /* ignorer */ }
   return {
-    exercises: [],        // { id, name, category, subs: [] }
+    exercises: [],        // { id, name, category, subs: [], equipment, timed }
     programs: [],         // { id, name, workouts: [{ id, name, exerciseIds: [] }] }
     history: [],          // fullførte økter
     active: null,         // pågående økt
     lastProgramId: null,  // programmet til forrige økt
+    bodyweight: [],       // { id, date, kg }
   };
 }
 
 let db = load();
 // Oppgrader data fra eldre versjoner
-db.exercises.forEach(e => { e.category ??= ''; e.subs ??= []; });
+db.exercises.forEach(e => { e.category ??= ''; e.subs ??= []; e.equipment ??= ''; e.timed ??= false; });
 db.lastProgramId ??= null;
+db.bodyweight ??= [];
 
 const save = () => localStorage.setItem(STORE_KEY, JSON.stringify(db));
 
 let view;              // hvilken side som vises
 let editDraft = null;  // kopi av fullført økt som redigeres
-const openCats = new Set(); // åpne kategorier i biblioteket
+let libQuery = '';     // søk i biblioteket
+const openCats = new Set(); // åpne muskelgrupper i biblioteket
 
 // ---------- Hjelpere ----------
 
@@ -48,18 +61,25 @@ const getExercise = id => db.exercises.find(e => e.id === id);
 const exName = id => getExercise(id)?.name ?? '(slettet øvelse)';
 const getProgram = id => db.programs.find(p => p.id === id);
 const getWorkout = (pid, wid) => getProgram(pid)?.workouts.find(w => w.id === wid);
-const catName = id => CATEGORIES.find(c => c.id === id)?.name ?? 'Uten kategori';
+const catName = id => CATEGORIES.find(c => c.id === id)?.name ?? 'Uten muskelgruppe';
+const eqName = id => EQUIPMENT.find(c => c.id === id)?.name ?? '';
 
 const num = v => parseFloat(String(v ?? '').replace(',', '.')) || 0;
 const fmt = n => n.toLocaleString('nb-NO', { maximumFractionDigits: 1 });
+const pad = n => String(n).padStart(2, '0');
 
 function formatDuration(ms) {
   const total = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
-  const pad = n => String(n).padStart(2, '0');
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+}
+
+// Sekunder -> «45 sek» / «1:30»
+function fmtSecs(v) {
+  const n = Math.round(num(v));
+  return n >= 60 ? `${Math.floor(n / 60)}:${pad(n % 60)}` : `${n} sek`;
 }
 
 const formatDate = ts => new Date(ts).toLocaleString('nb-NO', {
@@ -70,9 +90,25 @@ const formatDay = ts => new Date(ts).toLocaleDateString('nb-NO', { day: 'numeric
 // Tidspunkt -> verdi for <input type="datetime-local"> (lokal tid)
 const toLocalInput = ts => new Date(ts - new Date(ts).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
-const setText = set => `${set.weight || 0} kg × ${set.reps || 0}`;
-const emptySet = () => ({ weight: '', reps: '' });
-const hasData = s => s.weight !== '' || s.reps !== '';
+// Tidsøvelser har sett med { weight, time }, vanlige med { weight, reps }
+const isTimedSet = s => s.time !== undefined;
+function setText(s) {
+  if (isTimedSet(s)) return `${num(s.weight) ? `${s.weight} kg × ` : ''}${fmtSecs(s.time)}`;
+  return `${s.weight || 0} kg × ${s.reps || 0}`;
+}
+const emptySet = timed => (timed ? { weight: '', time: '' } : { weight: '', reps: '' });
+const hasData = s => Object.values(s).some(v => v !== '');
+const isTimedEx = ex => ex.timed ?? !!getExercise(ex.exerciseId)?.timed;
+const sessionEx = id => ({ exerciseId: id, name: exName(id), timed: !!getExercise(id)?.timed, sets: [emptySet(getExercise(id)?.timed)] });
+
+function exMeta(e) {
+  return [eqName(e.equipment), e.subs.join(', '), e.timed ? 'På tid' : ''].filter(Boolean).join(' · ');
+}
+
+function matchesQuery(e, q) {
+  if (!q) return true;
+  return [e.name, catName(e.category), eqName(e.equipment), ...e.subs].join(' ').toLowerCase().includes(q);
+}
 
 function homeProgramView() {
   return getProgram(db.lastProgramId)
@@ -88,18 +124,8 @@ function lastPerformance(exerciseId) {
   return null;
 }
 
-// Nedtrekksliste med øvelser gruppert på kategori
-function exerciseOptions() {
-  const sorted = [...db.exercises].sort((a, b) => a.name.localeCompare(b.name, 'nb'));
-  return [...CATEGORIES, { id: '', name: 'Uten kategori' }].map(c => {
-    const list = sorted.filter(e => (e.category || '') === c.id);
-    if (!list.length) return '';
-    return `<optgroup label="${esc(c.name)}">${list.map(e =>
-      `<option value="${e.id}">${esc(e.name)}</option>`).join('')}</optgroup>`;
-  }).join('');
-}
-
-function exercisePicker(formName, buttonText) {
+// Søkbar velger for å legge til øvelse. target = navnet på handlingen i `forms`
+function exercisePicker(target) {
   if (!db.exercises.length) {
     return `
       <div class="card muted">
@@ -108,17 +134,33 @@ function exercisePicker(formName, buttonText) {
       </div>`;
   }
   return `
-    <form class="row" data-form="${formName}">
-      <select name="exerciseId" required>${exerciseOptions()}</select>
-      <button>${buttonText}</button>
-    </form>`;
+    <div class="picker" data-target="${target}">
+      <input type="search" placeholder="🔍 Søk og legg til øvelse…" autocomplete="off" data-picker-input>
+      <div class="picker-results"></div>
+    </div>`;
+}
+
+function pickerResultsHtml(target, query) {
+  const q = query.trim().toLowerCase();
+  const list = [...db.exercises]
+    .filter(e => matchesQuery(e, q))
+    .sort((a, b) => a.name.localeCompare(b.name, 'nb'));
+  if (!list.length) {
+    return `<div class="muted small" style="padding:10px 4px">Ingen treff.
+      <button class="link" data-action="nav" data-view="library" style="color:var(--accent)">Lag ny øvelse ›</button></div>`;
+  }
+  return list.map(e => `
+    <div class="list-item clickable" data-action="pick-ex" data-target="${target}" data-id="${e.id}">
+      <div>${esc(e.name)}<div class="muted small">${esc([catName(e.category), exMeta(e)].filter(Boolean).join(' · '))}</div></div>
+      <span class="add">+</span>
+    </div>`).join('');
 }
 
 function subPickerHtml(catId, selected = []) {
   const cat = CATEGORIES.find(c => c.id === catId);
   if (!cat || !cat.subs.length) return '';
   return `
-    <div class="muted small">Underkategori (valgfritt, flere mulig)</div>
+    <div class="muted small">Under-muskelgruppe (valgfritt, flere mulig)</div>
     <div class="chips">${cat.subs.map(s => `
       <label class="chip"><input type="checkbox" name="subs" value="${esc(s)}" ${selected.includes(s) ? 'checked' : ''}>${esc(s)}</label>`).join('')}
     </div>`;
@@ -128,27 +170,59 @@ function exerciseFormFields(ex = {}) {
   return `
     <input name="name" placeholder="Navn på øvelse" value="${esc(ex.name || '')}" required>
     <select name="category" required>
-      <option value="" disabled ${ex.category ? '' : 'selected'}>Velg kategori</option>
+      <option value="" disabled ${ex.category ? '' : 'selected'}>Velg muskelgruppe</option>
       ${CATEGORIES.map(c => `<option value="${c.id}" ${ex.category === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
     </select>
-    <div class="sub-picker">${subPickerHtml(ex.category, ex.subs)}</div>`;
+    <div class="sub-picker">${subPickerHtml(ex.category, ex.subs)}</div>
+    <div class="row">
+      <select name="equipment" required>
+        <option value="" disabled ${ex.equipment ? '' : 'selected'}>Velg kategori</option>
+        ${EQUIPMENT.map(c => `<option value="${c.id}" ${ex.equipment === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+      </select>
+      <label class="switch-inline">
+        <span>På tid</span>
+        <input type="checkbox" name="timed" class="switch" role="switch" ${ex.timed ? 'checked' : ''}>
+      </label>
+    </div>`;
 }
 
 // Kort med sett for hver øvelse. scope = 'active' (pågående økt) eller 'edit' (redigering av fullført økt)
 const setTarget = scope => (scope === 'edit' ? editDraft : db.active);
 
+// Stoppeklokke for tidsøvelser i pågående økt: db.active.stopwatch = { i, s, startedAt }
+const stopwatchSecs = sw => Math.floor((Date.now() - sw.startedAt) / 1000);
+
+function stopStopwatch() {
+  const sw = db.active?.stopwatch;
+  if (!sw) return;
+  const set = db.active.exercises[sw.i]?.sets[sw.s];
+  if (set) set.time = String(Math.max(1, stopwatchSecs(sw)));
+  db.active.stopwatch = null;
+}
+
 function setCards(exercises, scope) {
   return exercises.map((ex, i) => {
+    const timed = isTimedEx(ex);
+    const withClock = timed && scope === 'active';
+    const sw = scope === 'active' ? db.active.stopwatch : null;
+    const f2 = timed ? 'time' : 'reps';
     const last = scope === 'active' ? lastPerformance(ex.exerciseId) : null;
-    const rows = ex.sets.map((s, j) => `
-      <div class="set-grid">
+    const rows = ex.sets.map((s, j) => {
+      const running = sw && sw.i === i && sw.s === j;
+      const val = running ? stopwatchSecs(sw) : s[f2];
+      return `
+      <div class="set-grid ${withClock ? 'timed' : ''}">
         <span class="num">${j + 1}</span>
         <input type="text" inputmode="decimal" autocomplete="off" placeholder="kg"
                value="${esc(s.weight)}" data-scope="${scope}" data-i="${i}" data-s="${j}" data-field="weight">
-        <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="reps"
-               value="${esc(s.reps)}" data-scope="${scope}" data-i="${i}" data-s="${j}" data-field="reps">
+        <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="${timed ? 'sek' : 'reps'}"
+               value="${esc(val)}" data-scope="${scope}" data-i="${i}" data-s="${j}" data-field="${f2}"
+               ${running ? 'readonly class="running"' : ''}>
+        ${withClock ? `<button class="sw-btn ${running ? 'running' : ''}" data-action="stopwatch" data-i="${i}" data-s="${j}"
+               aria-label="${running ? 'Stopp tid' : 'Start tid'}">${running ? '■' : '▶'}</button>` : ''}
         <button class="danger" data-action="remove-set" data-scope="${scope}" data-i="${i}" data-s="${j}" aria-label="Fjern sett">✕</button>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     return `
       <section class="card">
         <div class="card-head">
@@ -156,7 +230,7 @@ function setCards(exercises, scope) {
           <button class="danger small" data-action="remove-card-ex" data-scope="${scope}" data-i="${i}">Fjern øvelse</button>
         </div>
         ${last ? `<div class="muted" style="margin-bottom:8px">Forrige gang: ${esc(last)}</div>` : ''}
-        <div class="set-grid head"><span class="num">Sett</span><span style="text-align:center">Vekt (kg)</span><span style="text-align:center">Reps</span><span></span></div>
+        <div class="set-grid head ${withClock ? 'timed' : ''}"><span class="num">Sett</span><span style="text-align:center">Vekt (kg)</span><span style="text-align:center">${timed ? 'Tid (sek)' : 'Reps'}</span>${withClock ? '<span></span>' : ''}<span></span></div>
         ${rows}
         <button data-action="add-set" data-scope="${scope}" data-i="${i}" style="width:100%">+ Legg til sett</button>
       </section>`;
@@ -203,43 +277,60 @@ function renderWorkout() {
   const p = getProgram(view.programId);
   const w = getWorkout(view.programId, view.workoutId);
   if (!w) return go({ name: 'program', programId: view.programId });
-  const items = w.exerciseIds.map((id, i) => `
-    <div class="list-item">
-      <div>${i + 1}. ${esc(exName(id))}<div class="muted small">${esc(catName(getExercise(id)?.category))}</div></div>
-      <span class="row">
-        <button data-action="move-ex" data-i="${i}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Flytt opp">↑</button>
-        <button data-action="move-ex" data-i="${i}" data-dir="1" ${i === w.exerciseIds.length - 1 ? 'disabled' : ''} aria-label="Flytt ned">↓</button>
-        <button class="danger" data-action="remove-ex" data-i="${i}" aria-label="Fjern">✕</button>
-      </span>
-    </div>`).join('');
+  const items = w.exerciseIds.map((id, i) => {
+    const e = getExercise(id);
+    return `
+      <div class="list-item">
+        <div class="grow">${i + 1}. ${esc(exName(id))}
+          <div class="muted small">${esc([catName(e?.category), e ? exMeta(e) : ''].filter(Boolean).join(' · '))}</div></div>
+        <span class="row tight">
+          <button data-action="move-ex" data-i="${i}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Flytt opp">↑</button>
+          <button data-action="move-ex" data-i="${i}" data-dir="1" ${i === w.exerciseIds.length - 1 ? 'disabled' : ''} aria-label="Flytt ned">↓</button>
+          <button class="remove" data-action="remove-ex" data-i="${i}">Fjern</button>
+        </span>
+      </div>`;
+  }).join('');
   return `
     <button class="link" data-action="open-program" data-id="${p.id}">‹ ${esc(p.name)}</button>
     <h1>${esc(w.name)}</h1>
-    ${items || '<p class="empty">Ingen øvelser ennå. Legg til fra biblioteket.</p>'}
-    <div class="section">${exercisePicker('add-ex-to-workout', 'Legg til')}</div>
+    ${items || '<p class="empty">Ingen øvelser ennå. Søk opp og legg til under.</p>'}
+    <div class="section">${exercisePicker('add-ex-to-workout')}</div>
     <div class="section">
       <button class="primary big" data-action="start-session" ${w.exerciseIds.length ? '' : 'disabled'}>▶ Start økt</button>
     </div>
     <div class="section"><button class="danger" data-action="delete-workout">Slett økt</button></div>`;
 }
 
-function renderLibrary() {
+function libraryItem(e, showGroup) {
+  const meta = [showGroup ? catName(e.category) : '', exMeta(e)].filter(Boolean).join(' · ');
+  return `
+    <div class="list-item clickable" data-action="open-exercise" data-id="${e.id}">
+      <div>${esc(e.name)}${meta ? `<div class="muted small">${esc(meta)}</div>` : ''}</div>
+      <span class="muted">›</span>
+    </div>`;
+}
+
+function libraryGroupsHtml() {
   const sorted = [...db.exercises].sort((a, b) => a.name.localeCompare(b.name, 'nb'));
+  const q = libQuery.trim().toLowerCase();
+  if (q) {
+    const hits = sorted.filter(e => matchesQuery(e, q));
+    return hits.map(e => libraryItem(e, true)).join('') || '<p class="empty">Ingen treff.</p>';
+  }
   const groups = [...CATEGORIES];
-  if (sorted.some(e => !e.category)) groups.push({ id: '', name: 'Uten kategori' });
-  const groupHtml = groups.map(g => {
+  if (sorted.some(e => !e.category)) groups.push({ id: '', name: 'Uten muskelgruppe' });
+  return groups.map(g => {
     const list = sorted.filter(e => (e.category || '') === g.id);
-    const items = list.map(e => `
-      <div class="list-item clickable" data-action="open-exercise" data-id="${e.id}">
-        <div>${esc(e.name)}${e.subs.length ? `<div class="muted small">${esc(e.subs.join(', '))}</div>` : ''}</div>
-        <span class="muted">›</span>
-      </div>`).join('');
     return `
       <details class="group" data-cat="${g.id}" ${openCats.has(g.id) ? 'open' : ''}>
         <summary><strong>${esc(g.name)}</strong><span class="muted">${list.length}</span></summary>
-        <div class="group-body">${items || '<div class="muted small" style="padding:0 4px 8px">Ingen øvelser ennå</div>'}</div>
+        <div class="group-body">${list.map(e => libraryItem(e, false)).join('') ||
+          '<div class="muted small" style="padding:0 4px 8px">Ingen øvelser ennå</div>'}</div>
       </details>`;
   }).join('');
+}
+
+function renderLibrary() {
   return `
     <h1>Øvelser</h1>
     <form class="card stack" data-form="new-exercise">
@@ -247,11 +338,9 @@ function renderLibrary() {
       ${exerciseFormFields()}
       <button class="primary">Legg til</button>
     </form>
-    <div class="list-item clickable" data-action="nav" data-view="stats">
-      <strong>📊 Statistikk muskelgrupper</strong><span class="muted">›</span>
-    </div>
     <h2 class="section">Øvelsesbibliotek</h2>
-    ${groupHtml}`;
+    <input type="search" placeholder="🔍 Søk i biblioteket…" autocomplete="off" data-lib-search value="${esc(libQuery)}" style="margin-bottom:10px">
+    <div id="lib-groups">${libraryGroupsHtml()}</div>`;
 }
 
 function renderExercise() {
@@ -265,13 +354,32 @@ function renderExercise() {
     .map(h => ({ h, sets: h.exercises.filter(e => e.exerciseId === ex.id).flatMap(e => e.sets) }))
     .filter(x => x.sets.length);
 
-  let kg = 0, reps = 0, sets = 0, bestVol = null, heaviest = null;
+  let kg = 0, reps = 0, secs = 0, sets = 0, bestVol = null, heaviest = null, longest = null;
   entries.forEach(({ h, sets: ss }) => ss.forEach(s => {
-    const w = num(s.weight), r = num(s.reps), vol = w * r;
-    kg += vol; reps += r; sets++;
+    const w = num(s.weight), r = num(s.reps), t = num(s.time), vol = w * r;
+    kg += vol; reps += r; secs += t; sets++;
     if (!bestVol || vol > bestVol.vol) bestVol = { s, vol, date: h.startedAt };
     if (!heaviest || w > heaviest.w || (w === heaviest.w && r > heaviest.r)) heaviest = { s, w, r, date: h.startedAt };
+    if (!longest || t > longest.t) longest = { s, t, date: h.startedAt };
   }));
+
+  const bestCard = (label, best, value) => `
+    <div class="card">
+      <div class="muted small">${label}</div>
+      <strong>${best ? value : '–'}</strong>
+      ${best ? `<div class="muted small">${formatDay(best.date)}</div>` : ''}
+    </div>`;
+
+  const tiles = ex.timed
+    ? `<div class="stat"><div class="value">${fmtSecs(secs)}</div><div class="label">Total tid</div></div>
+       <div class="stat"><div class="value">${longest ? fmtSecs(longest.t) : '–'}</div><div class="label">Lengste sett</div></div>`
+    : `<div class="stat"><div class="value">${fmt(kg)} kg</div><div class="label">Totalt løftet</div></div>
+       <div class="stat"><div class="value">${fmt(reps)}</div><div class="label">Totalt reps</div></div>`;
+
+  const bests = ex.timed
+    ? (heaviest && heaviest.w ? bestCard('Sett med høyest vekt', heaviest, esc(setText(heaviest.s))) : '')
+    : bestCard('Sett med høyest volum (kg × reps)', bestVol, bestVol ? `${esc(setText(bestVol.s))} = ${fmt(bestVol.vol)} kg` : '') +
+      bestCard('Sett med høyest vekt', heaviest, heaviest ? esc(setText(heaviest.s)) : '');
 
   const historyHtml = entries.map(({ h, sets: ss }) => `
     <div class="card">
@@ -283,24 +391,14 @@ function renderExercise() {
   return `
     <button class="link" data-action="nav" data-view="library">‹ Øvelser</button>
     <h1 style="margin-bottom:4px">${esc(ex.name)}</h1>
-    <div class="muted" style="margin-bottom:16px">${esc(catName(ex.category))}${ex.subs.length ? ' · ' + esc(ex.subs.join(', ')) : ''}</div>
+    <div class="muted" style="margin-bottom:16px">${esc([catName(ex.category), exMeta(ex)].filter(Boolean).join(' · '))}</div>
 
     <div class="stat-grid">
-      <div class="stat"><div class="value">${fmt(kg)} kg</div><div class="label">Totalt løftet</div></div>
-      <div class="stat"><div class="value">${fmt(reps)}</div><div class="label">Totalt reps</div></div>
+      ${tiles}
       <div class="stat"><div class="value">${sets}</div><div class="label">Totalt sett</div></div>
       <div class="stat"><div class="value">${entries.length}</div><div class="label">Økter</div></div>
     </div>
-    <div class="card">
-      <div class="muted small">Sett med høyest volum (kg × reps)</div>
-      <strong>${bestVol ? `${esc(setText(bestVol.s))} = ${fmt(bestVol.vol)} kg` : '–'}</strong>
-      ${bestVol ? `<div class="muted small">${formatDay(bestVol.date)}</div>` : ''}
-    </div>
-    <div class="card">
-      <div class="muted small">Sett med høyest vekt</div>
-      <strong>${heaviest ? esc(setText(heaviest.s)) : '–'}</strong>
-      ${heaviest ? `<div class="muted small">${formatDay(heaviest.date)}</div>` : ''}
-    </div>
+    ${bests}
 
     <h2 class="section">Historikk</h2>
     ${historyHtml || '<p class="empty">Ingen fullførte økter med denne øvelsen ennå.</p>'}
@@ -357,11 +455,11 @@ function renderStats() {
     `<button class="${period === p ? 'active' : ''}" data-action="stats-period" data-p="${p}">${label}</button>`).join('');
 
   return `
-    <button class="link" data-action="nav" data-view="library">‹ Øvelser</button>
+    <button class="link" data-action="nav" data-view="profile">‹ Profil</button>
     <h1>Muskelgrupper</h1>
     <div class="seg">${seg}</div>
     ${total ? rows : '<p class="empty">Ingen fullførte sett i denne perioden.</p>'}
-    <p class="muted small">Antall sett fra fullførte økter, fordelt på øvelsens kategori. Kg = vekt × reps.</p>`;
+    <p class="muted small">Antall sett fra fullførte økter, fordelt på øvelsens muskelgruppe. Kg = vekt × reps.</p>`;
 }
 
 function renderSession() {
@@ -369,7 +467,7 @@ function renderSession() {
   if (!a) return go(homeProgramView());
   return `
     ${setCards(a.exercises, 'active') || '<p class="empty">Ingen øvelser i økta. Legg til under.</p>'}
-    ${exercisePicker('session-add-exercise', '+ Øvelse')}
+    ${exercisePicker('session-add-exercise')}
     <div class="section stack">
       <button class="primary big" data-action="finish-session">✓ Fullfør økt</button>
       <button class="danger big" data-action="cancel-session">Avbryt økt</button>
@@ -412,11 +510,69 @@ function renderHistoryEdit() {
         <input type="text" inputmode="numeric" pattern="[0-9]*" value="${esc(d._minutes)}" data-meta="_minutes"></label>
     </div>
     ${setCards(d.exercises, 'edit')}
-    ${exercisePicker('edit-add-exercise', '+ Øvelse')}
+    ${exercisePicker('edit-add-exercise')}
     <div class="section stack">
       <button class="primary big" data-action="save-history">Lagre endringer</button>
       <button class="big" data-action="nav" data-view="history">Avbryt</button>
     </div>`;
+}
+
+function weightChart(list) {
+  const W = 320, H = 140, P = 12;
+  const xs = list.map(e => e.date), ys = list.map(e => num(e.kg));
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const sx = t => (x1 === x0 ? W / 2 : P + (t - x0) / (x1 - x0) * (W - 2 * P));
+  const sy = v => (y1 === y0 ? H / 2 : H - P - (v - y0) / (y1 - y0) * (H - 2 * P));
+  const pts = list.map((e, i) => `${sx(xs[i]).toFixed(1)},${sy(ys[i]).toFixed(1)}`);
+  return `
+    <div class="card">
+      <svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="Utvikling i kroppsvekt">
+        <polyline points="${pts.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+        ${pts.map(p => { const [x, y] = p.split(','); return `<circle cx="${x}" cy="${y}" r="3.5" fill="var(--accent)"/>`; }).join('')}
+      </svg>
+      <div class="row muted small" style="justify-content:space-between;margin-top:6px">
+        <span>${formatDay(x0)}</span><span>min ${fmt(y0)} · maks ${fmt(y1)} kg</span><span>${formatDay(x1)}</span>
+      </div>
+    </div>`;
+}
+
+function renderProfile() {
+  const list = [...db.bodyweight].sort((a, b) => a.date - b.date);
+  const latest = list[list.length - 1];
+  const prev = list[list.length - 2];
+  const change = (from, label) => {
+    if (!from) return '';
+    const d = num(latest.kg) - num(from.kg);
+    return `<div class="muted small">${d > 0 ? '+' : ''}${fmt(d)} kg ${label}</div>`;
+  };
+  return `
+    <h1>Profil</h1>
+    <div class="list-item clickable" data-action="nav" data-view="stats">
+      <strong>📊 Statistikk muskelgrupper</strong><span class="muted">›</span>
+    </div>
+    <h2 class="section">Kroppsvekt</h2>
+    ${latest ? `
+      <div class="stat-grid">
+        <div class="stat"><div class="value">${fmt(num(latest.kg))} kg</div><div class="label">Nå (${formatDay(latest.date)})</div></div>
+        <div class="stat">${change(prev, 'siden forrige') || '<div class="muted small">–</div>'}${list.length > 2 ? change(list[0], 'totalt') : ''}</div>
+      </div>` : ''}
+    <form class="card stack" data-form="new-bodyweight">
+      <strong>Legg inn vekt</strong>
+      <div class="row">
+        <input name="kg" type="text" inputmode="decimal" autocomplete="off" placeholder="kg" data-clean="decimal" required>
+        <input name="date" type="date" value="${toLocalInput(Date.now()).slice(0, 10)}" required>
+      </div>
+      <button class="primary">Lagre</button>
+    </form>
+    ${list.length >= 2 ? weightChart(list) : ''}
+    <h2 class="section">Logg</h2>
+    ${[...list].reverse().map(e => `
+      <div class="list-item">
+        <span>${formatDay(e.date)}</span>
+        <span class="row"><strong>${fmt(num(e.kg))} kg</strong>
+          <button class="danger" data-action="delete-bw" data-id="${e.id}" aria-label="Slett">✕</button></span>
+      </div>`).join('') || '<p class="empty">Ingen registreringer ennå.</p>'}`;
 }
 
 function renderHeader() {
@@ -438,9 +594,10 @@ const VIEWS = {
   programs: renderPrograms, program: renderProgram, workout: renderWorkout,
   library: renderLibrary, exercise: renderExercise, stats: renderStats,
   session: renderSession, history: renderHistory, historyEdit: renderHistoryEdit,
+  profile: renderProfile,
 };
 
-const TAB_OF = { program: 'programs', workout: 'programs', exercise: 'library', stats: 'library', historyEdit: 'history' };
+const TAB_OF = { program: 'programs', workout: 'programs', exercise: 'library', stats: 'profile', historyEdit: 'history' };
 
 function render() {
   const html = VIEWS[view.name]();
@@ -463,8 +620,13 @@ function go(newView) {
 function tick() {
   const el = document.getElementById('timer');
   if (el && db.active) el.textContent = formatDuration(Date.now() - db.active.startedAt);
+  const sw = db.active?.stopwatch;
+  if (sw) {
+    const input = document.querySelector(`[data-scope="active"][data-i="${sw.i}"][data-s="${sw.s}"][data-field="time"]`);
+    if (input) input.value = stopwatchSecs(sw);
+  }
 }
-setInterval(tick, 1000);
+setInterval(tick, 250);
 document.addEventListener('visibilitychange', tick);
 
 // ---------- Handlinger ----------
@@ -476,6 +638,11 @@ const actions = {
   'open-workout': d => go({ name: 'workout', programId: view.programId, workoutId: d.id }),
   'open-exercise': d => go({ name: 'exercise', exerciseId: d.id }),
   'stats-period': d => go({ name: 'stats', period: d.p }),
+
+  'pick-ex': d => {
+    forms[d.target]?.({ exerciseId: d.id });
+    save(); render();
+  },
 
   'delete-program': () => {
     const p = getProgram(view.programId);
@@ -520,19 +687,27 @@ const actions = {
       programName: p.name,
       workoutName: w.name,
       startedAt: Date.now(),
-      exercises: w.exerciseIds.map(id => ({ exerciseId: id, name: exName(id), sets: [emptySet()] })),
+      exercises: w.exerciseIds.map(sessionEx),
     };
     db.lastProgramId = p.id;
     save(); go({ name: 'session' });
   },
   'add-set': d => {
-    const sets = setTarget(d.scope).exercises[+d.i].sets;
-    const prev = sets[sets.length - 1];
-    sets.push(prev ? { ...prev } : emptySet());
+    const ex = setTarget(d.scope).exercises[+d.i];
+    const prev = ex.sets[ex.sets.length - 1];
+    ex.sets.push(prev ? { ...prev } : emptySet(isTimedEx(ex)));
     if (d.scope === 'active') save();
     render();
   },
+  'stopwatch': d => {
+    const sw = db.active.stopwatch;
+    const same = sw && sw.i === +d.i && sw.s === +d.s;
+    stopStopwatch(); // stopper (og lagrer) en eventuell klokke som går
+    if (!same) db.active.stopwatch = { i: +d.i, s: +d.s, startedAt: Date.now() };
+    save(); render();
+  },
   'remove-set': d => {
+    if (d.scope === 'active') stopStopwatch(); // indekser kan endre seg
     setTarget(d.scope).exercises[+d.i].sets.splice(+d.s, 1);
     if (d.scope === 'active') save();
     render();
@@ -541,12 +716,14 @@ const actions = {
     const list = setTarget(d.scope).exercises;
     const ex = list[+d.i];
     if (!confirm(`Fjerne «${ex.name}» fra økta?`)) return;
+    if (d.scope === 'active') stopStopwatch();
     list.splice(+d.i, 1);
     if (d.scope === 'active') save();
     render();
   },
   'finish-session': () => {
     if (!confirm('Fullføre og lagre økta?')) return;
+    stopStopwatch();
     const a = db.active;
     // Spør om endringer i øvelsene skal lagres permanent i økta
     const w = getWorkout(a.programId, a.workoutId);
@@ -566,6 +743,7 @@ const actions = {
       exercises: a.exercises.map(ex => ({
         exerciseId: ex.exerciseId,
         name: ex.name,
+        timed: isTimedEx(ex),
         sets: ex.sets.filter(hasData),
       })),
     });
@@ -583,7 +761,7 @@ const actions = {
     editDraft = JSON.parse(JSON.stringify(h));
     editDraft._start = toLocalInput(h.startedAt);
     editDraft._minutes = String(Math.round((h.endedAt - h.startedAt) / 60000));
-    editDraft.exercises.forEach(e => { if (!e.sets.length) e.sets.push(emptySet()); });
+    editDraft.exercises.forEach(e => { if (!e.sets.length) e.sets.push(emptySet(isTimedEx(e))); });
     go({ name: 'historyEdit' });
   },
   'save-history': () => {
@@ -603,6 +781,11 @@ const actions = {
     db.history = db.history.filter(h => h.id !== d.id);
     save(); render();
   },
+  'delete-bw': d => {
+    if (!confirm('Slette denne registreringen?')) return;
+    db.bodyweight = db.bodyweight.filter(e => e.id !== d.id);
+    save(); render();
+  },
 };
 
 const forms = {
@@ -620,7 +803,7 @@ const forms = {
       alert('Øvelsen finnes allerede.');
       return;
     }
-    db.exercises.push({ id: uid(), name: f.name, category: f.category, subs: f.subs });
+    db.exercises.push({ id: uid(), name: f.name, category: f.category, subs: f.subs, equipment: f.equipment, timed: f.timed });
     openCats.add(f.category);
   },
   'edit-exercise': f => {
@@ -629,17 +812,24 @@ const forms = {
       alert('En annen øvelse har allerede dette navnet.');
       return;
     }
-    Object.assign(ex, { name: f.name, category: f.category, subs: f.subs });
+    Object.assign(ex, { name: f.name, category: f.category, subs: f.subs, equipment: f.equipment, timed: f.timed });
     // Oppdater navnet i historikk og pågående økt også
     [...db.history, db.active].filter(Boolean).forEach(s => s.exercises.forEach(e => {
       if (e.exerciseId === ex.id) e.name = ex.name;
     }));
   },
   'session-add-exercise': f => {
-    db.active.exercises.push({ exerciseId: f.exerciseId, name: exName(f.exerciseId), sets: [emptySet()] });
+    db.active.exercises.push(sessionEx(f.exerciseId));
   },
   'edit-add-exercise': f => {
-    editDraft.exercises.push({ exerciseId: f.exerciseId, name: exName(f.exerciseId), sets: [emptySet()] });
+    editDraft.exercises.push(sessionEx(f.exerciseId));
+  },
+  'new-bodyweight': f => {
+    if (!num(f.kg)) { alert('Skriv inn en gyldig vekt.'); return; }
+    const date = new Date(`${f.date}T12:00`).getTime();
+    // Én registrering per dag – samme dag erstattes
+    db.bodyweight = db.bodyweight.filter(e => new Date(e.date).toDateString() !== new Date(date).toDateString());
+    db.bodyweight.push({ id: uid(), date, kg: f.kg });
   },
 };
 
@@ -656,34 +846,60 @@ document.addEventListener('submit', e => {
   const fd = new FormData(form);
   const data = Object.fromEntries(fd);
   data.subs = fd.getAll('subs');
+  data.timed = fd.has('timed');
   if (data.name !== undefined) data.name = data.name.trim();
   if (data.name === '') return;
   forms[form.dataset.form]?.(data);
   save(); render();
 });
 
-// Vis riktige underkategorier når kategori velges
+// Vis riktige under-muskelgrupper når muskelgruppe velges
 document.addEventListener('change', e => {
   if (e.target.name !== 'category') return;
   const picker = e.target.closest('form')?.querySelector('.sub-picker');
   if (picker) picker.innerHTML = subPickerHtml(e.target.value);
 });
 
-// Husk hvilke kategorier som er åpne i biblioteket
+// Husk hvilke muskelgrupper som er åpne i biblioteket
 document.addEventListener('toggle', e => {
   const cat = e.target.dataset?.cat;
   if (cat === undefined) return;
   e.target.open ? openCats.add(cat) : openCats.delete(cat);
 }, true);
 
-// Lagre vekt/reps fortløpende uten å rendre på nytt (beholder fokus i feltet)
+// Vis treff når søkefeltet for å legge til øvelse får fokus
+document.addEventListener('focusin', e => {
+  if (!e.target.matches('[data-picker-input]')) return;
+  const picker = e.target.closest('.picker');
+  picker.querySelector('.picker-results').innerHTML = pickerResultsHtml(picker.dataset.target, e.target.value);
+});
+
 document.addEventListener('input', e => {
   const el = e.target;
+
+  // Søk når man legger til øvelse
+  if (el.matches('[data-picker-input]')) {
+    const picker = el.closest('.picker');
+    picker.querySelector('.picker-results').innerHTML = pickerResultsHtml(picker.dataset.target, el.value);
+    return;
+  }
+  // Søk i biblioteket
+  if (el.matches('[data-lib-search]')) {
+    libQuery = el.value;
+    document.getElementById('lib-groups').innerHTML = libraryGroupsHtml();
+    return;
+  }
+  if (el.dataset.clean === 'decimal') {
+    el.value = el.value.replace(/[^0-9.,]/g, '');
+    return;
+  }
+  // Starttid/varighet ved redigering av fullført økt
   if (el.dataset.meta && editDraft) {
     if (el.dataset.meta === '_minutes') el.value = el.value.replace(/[^0-9]/g, '');
     editDraft[el.dataset.meta] = el.value;
     return;
   }
+  // Vekt/reps/tid lagres fortløpende uten å rendre på nytt (beholder fokus i feltet)
   if (!el.dataset.field) return;
   const target = setTarget(el.dataset.scope);
   if (!target) return;

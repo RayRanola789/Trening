@@ -103,13 +103,13 @@ const COLOR_FIELDS = [
 
 const THEMES = [
   { name: 'Standard', colors: DEFAULT_COLORS },
-  { name: 'Blå',      colors: { ...DEFAULT_COLORS, accent: '#3b82f6' } },
-  { name: 'Lilla',    colors: { ...DEFAULT_COLORS, accent: '#a855f7' } },
-  { name: 'Oransje',  colors: { ...DEFAULT_COLORS, accent: '#f97316' } },
-  { name: 'Rosa',     colors: { ...DEFAULT_COLORS, accent: '#ec4899' } },
-  { name: 'Gul',      colors: { ...DEFAULT_COLORS, accent: '#eab308' } },
-  { name: 'Svart',    colors: { accent: '#30d158', bg: '#000000', card: '#1c1c1e', text: '#f2f2f7', muted: '#8e8e93', line: '#3a3a3c', danger: '#ff453a' } },
-  { name: 'Lys',      colors: { accent: '#16a34a', bg: '#f1f5f9', card: '#ffffff', text: '#0f172a', muted: '#64748b', line: '#cbd5e1', danger: '#dc2626' } },
+  { name: 'Hav',      colors: { accent: '#38bdf8', bg: '#04172b', card: '#0b2a47', text: '#e0f2fe', muted: '#7dafd4', line: '#1a4569', danger: '#f87171' } },
+  { name: 'Lilla',    colors: { accent: '#c084fc', bg: '#140b24', card: '#241539', text: '#f3e8ff', muted: '#a78bc9', line: '#3d2a5c', danger: '#fb7185' } },
+  { name: 'Glød',     colors: { accent: '#fb923c', bg: '#1c0f08', card: '#2e1a10', text: '#fff1e6', muted: '#c49a80', line: '#4a2d1c', danger: '#ef4444' } },
+  { name: 'Rosa',     colors: { accent: '#f472b6', bg: '#22081a', card: '#36122b', text: '#fde7f3', muted: '#c88fb0', line: '#572045', danger: '#f87171' } },
+  { name: 'Skog',     colors: { accent: '#a3e635', bg: '#0a1a10', card: '#13291b', text: '#ecfccb', muted: '#8fae96', line: '#244030', danger: '#f87171' } },
+  { name: 'Svart',    colors: { accent: '#ffd60a', bg: '#000000', card: '#1c1c1e', text: '#f2f2f7', muted: '#8e8e93', line: '#3a3a3c', danger: '#ff453a' } },
+  { name: 'Lys',      colors: { accent: '#2563eb', bg: '#f1f5f9', card: '#ffffff', text: '#0f172a', muted: '#64748b', line: '#cbd5e1', danger: '#dc2626' } },
 ];
 
 const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
@@ -669,7 +669,6 @@ function renderProgram() {
       <input name="name" placeholder="${p.type === 'cardio' ? 'Ny økt, f.eks. «Intervalldag»' : 'Ny økt, f.eks. «Push dag»'}" required>
       <button class="primary">Legg til</button>
     </form>
-    ${freeStartHtml()}
     <div class="section"><button class="soft-danger big" data-action="delete-program">Slett program</button></div>`;
 }
 

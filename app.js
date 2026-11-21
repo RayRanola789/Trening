@@ -110,6 +110,40 @@ function matchesQuery(e, q) {
   return [e.name, catName(e.category), eqName(e.equipment), ...e.subs].join(' ').toLowerCase().includes(q);
 }
 
+// Bekreftelsesark i iOS-stil (erstatter confirm/alert som viser nettadressen på iPhone).
+// Returnerer et Promise som gir true ved bekreftelse.
+function ask(title, message = '', { ok = 'Slett', cancel = 'Avbryt', danger = true } = {}) {
+  return new Promise(resolve => {
+    const el = document.createElement('div');
+    el.className = 'sheet-backdrop';
+    el.innerHTML = `
+      <div class="sheet" role="dialog" aria-modal="true">
+        <div class="sheet-group">
+          <div class="sheet-msg">
+            <strong>${esc(title)}</strong>
+            ${message ? `<span>${esc(message)}</span>` : ''}
+          </div>
+          <button class="sheet-btn ${danger ? 'danger' : ''}" data-r="1">${esc(ok)}</button>
+        </div>
+        ${cancel ? `<button class="sheet-btn cancel" data-r="0">${esc(cancel)}</button>` : ''}
+      </div>`;
+    const close = value => {
+      el.classList.remove('open');
+      setTimeout(() => el.remove(), 250);
+      resolve(value);
+    };
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const btn = e.target.closest('[data-r]');
+      if (btn) close(btn.dataset.r === '1');
+      else if (e.target === el) close(false); // trykk utenfor = avbryt
+    });
+    document.body.appendChild(el);
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('open')));
+  });
+}
+const notice = (title, message) => ask(title, message, { ok: 'OK', cancel: '', danger: false });
+
 function homeProgramView() {
   return getProgram(db.lastProgramId)
     ? { name: 'program', programId: db.lastProgramId }
@@ -270,7 +304,7 @@ function renderProgram() {
       <input name="name" placeholder="Ny økt, f.eks. «Push dag»" required>
       <button class="primary">Legg til</button>
     </form>
-    <div class="section"><button class="danger" data-action="delete-program">Slett program</button></div>`;
+    <div class="section"><button class="soft-danger big" data-action="delete-program">Slett program</button></div>`;
 }
 
 function renderWorkout() {
@@ -298,7 +332,7 @@ function renderWorkout() {
     <div class="section">
       <button class="primary big" data-action="start-session" ${w.exerciseIds.length ? '' : 'disabled'}>▶ Start økt</button>
     </div>
-    <div class="section"><button class="danger" data-action="delete-workout">Slett økt</button></div>`;
+    <div class="section"><button class="soft-danger big" data-action="delete-workout">Slett økt</button></div>`;
 }
 
 function libraryItem(e, showGroup) {
@@ -410,7 +444,7 @@ function renderExercise() {
         <button class="primary">Lagre</button>
       </form>
     </details>
-    <div class="section"><button class="danger" data-action="delete-exercise">Slett øvelse</button></div>`;
+    <div class="section"><button class="soft-danger big" data-action="delete-exercise">Slett øvelse</button></div>`;
 }
 
 function renderStats() {
@@ -470,7 +504,7 @@ function renderSession() {
     ${exercisePicker('session-add-exercise')}
     <div class="section stack">
       <button class="primary big" data-action="finish-session">✓ Fullfør økt</button>
-      <button class="danger big" data-action="cancel-session">Avbryt økt</button>
+      <button class="soft-danger big" data-action="cancel-session">Avbryt økt</button>
     </div>`;
 }
 
@@ -487,8 +521,8 @@ function renderHistory() {
           <div class="muted">${ex.sets.map((s, i) => `${i + 1}: ${esc(setText(s))}`).join('<br>') || 'Ingen sett'}</div>
         </div>`).join('')}
       <div class="section row">
-        <button data-action="edit-history" data-id="${h.id}">Rediger</button>
-        <button class="danger" data-action="delete-history" data-id="${h.id}">Slett</button>
+        <button class="grow" data-action="edit-history" data-id="${h.id}">Rediger</button>
+        <button class="grow soft-danger" data-action="delete-history" data-id="${h.id}">Slett</button>
       </div>
     </details>`).join('');
   return `
@@ -644,16 +678,16 @@ const actions = {
     save(); render();
   },
 
-  'delete-program': () => {
+  'delete-program': async () => {
     const p = getProgram(view.programId);
-    if (!confirm(`Slette programmet «${p.name}»?`)) return;
+    if (!await ask(`Slette «${p.name}»?`, 'Programmet og alle øktene i det slettes. Historikken beholdes.', { ok: 'Slett program' })) return;
     db.programs = db.programs.filter(x => x !== p);
     save(); go({ name: 'programs' });
   },
-  'delete-workout': () => {
+  'delete-workout': async () => {
     const p = getProgram(view.programId);
     const w = getWorkout(view.programId, view.workoutId);
-    if (!confirm(`Slette økta «${w.name}»?`)) return;
+    if (!await ask(`Slette «${w.name}»?`, 'Økta fjernes fra programmet. Historikken beholdes.', { ok: 'Slett økt' })) return;
     p.workouts = p.workouts.filter(x => x !== w);
     save(); go({ name: 'program', programId: p.id });
   },
@@ -667,9 +701,9 @@ const actions = {
     [ids[i], ids[j]] = [ids[j], ids[i]];
     save(); render();
   },
-  'delete-exercise': () => {
+  'delete-exercise': async () => {
     const e = getExercise(view.exerciseId);
-    if (!confirm(`Slette «${e.name}» fra biblioteket? Den fjernes også fra økter den er lagt i. Historikken beholdes.`)) return;
+    if (!await ask(`Slette «${e.name}»?`, 'Den fjernes fra biblioteket og fra øktene den er lagt i. Historikken beholdes.', { ok: 'Slett øvelse' })) return;
     db.exercises = db.exercises.filter(x => x !== e);
     db.programs.forEach(p => p.workouts.forEach(w => {
       w.exerciseIds = w.exerciseIds.filter(id => id !== e.id);
@@ -677,10 +711,10 @@ const actions = {
     save(); go({ name: 'library' });
   },
 
-  'start-session': () => {
-    if (db.active && !confirm('Du har allerede en pågående økt. Erstatte den?')) return;
+  'start-session': async () => {
     const p = getProgram(view.programId);
     const w = getWorkout(view.programId, view.workoutId);
+    if (db.active && !await ask('Du har allerede en økt i gang', `Vil du avbryte «${db.active.workoutName}» og starte en ny?`, { ok: 'Start ny økt' })) return;
     db.active = {
       programId: p.id,
       workoutId: w.id,
@@ -712,24 +746,27 @@ const actions = {
     if (d.scope === 'active') save();
     render();
   },
-  'remove-card-ex': d => {
+  'remove-card-ex': async d => {
     const list = setTarget(d.scope).exercises;
     const ex = list[+d.i];
-    if (!confirm(`Fjerne «${ex.name}» fra økta?`)) return;
+    // Spør bare hvis det er logget noe på øvelsen
+    if (ex.sets.some(hasData) &&
+        !await ask(`Fjerne «${ex.name}»?`, 'Settene du har logget på denne øvelsen forsvinner.', { ok: 'Fjern øvelse' })) return;
     if (d.scope === 'active') stopStopwatch();
     list.splice(+d.i, 1);
     if (d.scope === 'active') save();
     render();
   },
-  'finish-session': () => {
-    if (!confirm('Fullføre og lagre økta?')) return;
+  'finish-session': async () => {
+    if (!await ask('Fullføre økta?', 'Økta lagres i historikken.', { ok: 'Fullfør økt', danger: false })) return;
     stopStopwatch();
     const a = db.active;
     // Spør om endringer i øvelsene skal lagres permanent i økta
     const w = getWorkout(a.programId, a.workoutId);
     const ids = a.exercises.map(e => e.exerciseId).filter(id => getExercise(id));
     if (w && JSON.stringify(ids) !== JSON.stringify(w.exerciseIds) &&
-        confirm(`Du har endret øvelsene i økta. Vil du lagre endringene i «${w.name}» permanent?`)) {
+        await ask(`Oppdatere «${w.name}»?`, 'Du har lagt til eller fjernet øvelser. Skal økta ha disse øvelsene neste gang også?',
+          { ok: 'Ja, oppdater økta', cancel: 'Nei, bare denne gangen', danger: false })) {
       w.exerciseIds = ids;
     }
     db.history.push({
@@ -750,8 +787,8 @@ const actions = {
     db.active = null;
     save(); go({ name: 'history' });
   },
-  'cancel-session': () => {
-    if (!confirm('Avbryte økta? Det du har logget blir ikke lagret.')) return;
+  'cancel-session': async () => {
+    if (!await ask('Avbryte økta?', 'Det du har logget blir ikke lagret.', { ok: 'Avbryt økt', cancel: 'Fortsett økta' })) return;
     db.active = null;
     save(); go(homeProgramView());
   },
@@ -767,7 +804,7 @@ const actions = {
   'save-history': () => {
     const { _start, _minutes, ...h } = editDraft;
     const start = new Date(_start).getTime();
-    if (isNaN(start)) { alert('Ugyldig starttid.'); return; }
+    if (isNaN(start)) { notice('Ugyldig starttid', 'Velg dato og klokkeslett for når økta startet.'); return; }
     h.startedAt = start;
     h.endedAt = start + (parseInt(_minutes, 10) || 0) * 60000;
     h.exercises = h.exercises.map(e => ({ ...e, sets: e.sets.filter(hasData) }));
@@ -776,13 +813,15 @@ const actions = {
     editDraft = null;
     save(); go({ name: 'history' });
   },
-  'delete-history': d => {
-    if (!confirm('Slette denne økta fra historikken?')) return;
+  'delete-history': async d => {
+    const h = db.history.find(x => x.id === d.id);
+    if (!await ask(`Slette «${h.workoutName}»?`, `Økta fra ${formatDate(h.startedAt)} slettes fra historikken for godt.`, { ok: 'Slett økt' })) return;
     db.history = db.history.filter(h => h.id !== d.id);
     save(); render();
   },
-  'delete-bw': d => {
-    if (!confirm('Slette denne registreringen?')) return;
+  'delete-bw': async d => {
+    const e = db.bodyweight.find(x => x.id === d.id);
+    if (!await ask('Slette registreringen?', `${fmt(num(e.kg))} kg – ${formatDay(e.date)}`, { ok: 'Slett' })) return;
     db.bodyweight = db.bodyweight.filter(e => e.id !== d.id);
     save(); render();
   },
@@ -800,7 +839,7 @@ const forms = {
   },
   'new-exercise': f => {
     if (db.exercises.some(e => e.name.toLowerCase() === f.name.toLowerCase())) {
-      alert('Øvelsen finnes allerede.');
+      notice('Øvelsen finnes allerede', `«${f.name}» ligger allerede i biblioteket.`);
       return;
     }
     db.exercises.push({ id: uid(), name: f.name, category: f.category, subs: f.subs, equipment: f.equipment, timed: f.timed });
@@ -809,7 +848,7 @@ const forms = {
   'edit-exercise': f => {
     const ex = getExercise(view.exerciseId);
     if (db.exercises.some(e => e !== ex && e.name.toLowerCase() === f.name.toLowerCase())) {
-      alert('En annen øvelse har allerede dette navnet.');
+      notice('Navnet er i bruk', 'En annen øvelse har allerede dette navnet.');
       return;
     }
     Object.assign(ex, { name: f.name, category: f.category, subs: f.subs, equipment: f.equipment, timed: f.timed });
@@ -825,7 +864,7 @@ const forms = {
     editDraft.exercises.push(sessionEx(f.exerciseId));
   },
   'new-bodyweight': f => {
-    if (!num(f.kg)) { alert('Skriv inn en gyldig vekt.'); return; }
+    if (!num(f.kg)) { notice('Ugyldig vekt', 'Skriv inn vekten i kg, f.eks. 82,5.'); return; }
     const date = new Date(`${f.date}T12:00`).getTime();
     // Én registrering per dag – samme dag erstattes
     db.bodyweight = db.bodyweight.filter(e => new Date(e.date).toDateString() !== new Date(date).toDateString());

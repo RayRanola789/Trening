@@ -183,6 +183,40 @@ button.remove { background: rgba(239, 68, 68, .15); color: var(--danger); font-w
 /* Kroppsvektgraf */
 .chart { width: 100%; height: auto; display: block; }
 
+/* Myke sletteknapper */
+button.soft-danger { background: rgba(239, 68, 68, .12); color: var(--danger); font-weight: 600; }
+button.soft-danger:active { background: rgba(239, 68, 68, .22); }
+
+/* Bekreftelsesark (iOS action sheet) */
+.sheet-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0, 0, 0, 0); transition: background .25s;
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.sheet-backdrop.open { background: rgba(0, 0, 0, .55); }
+.sheet {
+  width: 100%; max-width: 500px;
+  padding: 0 10px calc(10px + env(safe-area-inset-bottom));
+  transform: translateY(110%); transition: transform .25s cubic-bezier(.2, .8, .2, 1);
+}
+.sheet-backdrop.open .sheet { transform: translateY(0); }
+.sheet-group, .sheet-btn.cancel {
+  background: #273449; border-radius: 14px; overflow: hidden;
+}
+.sheet-msg {
+  padding: 16px 20px; text-align: center; border-bottom: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.sheet-msg strong { font-size: 1rem; }
+.sheet-msg span { color: var(--muted); font-size: .85rem; line-height: 1.35; }
+.sheet-btn {
+  display: block; width: 100%; border-radius: 0; background: none;
+  padding: 17px; font-size: 1.1rem; color: var(--accent); font-weight: 600;
+}
+.sheet-btn.danger { color: var(--danger); }
+.sheet-btn:active { background: rgba(255, 255, 255, .06); }
+.sheet-btn.cancel { margin-top: 8px; color: var(--text); font-weight: 700; }
+
 details summary { cursor: pointer; list-style: none; }
 details summary::-webkit-details-marker { display: none; }
 .history-ex { margin-top: 10px; }

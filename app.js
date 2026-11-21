@@ -51,6 +51,8 @@ const ICONS = {
   stats: '<svg viewBox="0 0 24 24"><path d="M4 20.5h16"/><path d="M6.5 17V12M11 17V6.5M15.5 17V9.5M20 17v-4" stroke-width="2.6"/></svg>',
   // Forstørrelsesglass
   search: '<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.4 15.4L20.5 20.5"/></svg>',
+  // Malerpalett
+  palette: '<svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0 0 17c1.3 0 2-.8 2-1.8 0-1.3-1.2-1.7-1.2-2.9 0-1 .8-1.8 1.8-1.8h2.2a3.7 3.7 0 0 0 3.7-3.7C20.5 6.6 16.7 3.5 12 3.5z"/><circle cx="7.8" cy="11" r="1.1"/><circle cx="10.2" cy="7.3" r="1.1"/><circle cx="14.6" cy="7.6" r="1.1"/></svg>',
   // Glidebrytere
   settings: '<svg viewBox="0 0 24 24"><path d="M4 6.5h9M17 6.5h3M4 12h3M11 12h9M4 17.5h11M19 17.5h1"/><circle cx="15" cy="6.5" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17.5" r="2"/></svg>',
 };
@@ -1335,6 +1337,20 @@ function slotsHtml() {
 }
 
 function renderSettings() {
+  const s = db.settings;
+  const themeName = s.activeSlot !== null ? s.custom[s.activeSlot].name
+    : (THEMES.find(x => Object.keys(DEFAULT_COLORS).every(k => x.colors[k].toLowerCase() === currentColors()[k].toLowerCase())) ?? { name: 'Egne farger' }).name;
+  return `
+    <button class="link" data-action="nav" data-view="profile">‹ Profil</button>
+    <h1>Innstillinger</h1>
+    <div class="list-item clickable" data-action="nav" data-view="colors">
+      <span class="menu-row"><span class="menu-ico">${ICONS.palette}</span>
+        <span><strong>Farger og tema</strong><div class="muted small">${esc(themeName)}</div></span></span>
+      <span class="muted">›</span>
+    </div>`;
+}
+
+function renderColors() {
   const c = currentColors();
   const { custom, activeSlot } = db.settings;
   const fields = COLOR_FIELDS.map(([k, label]) => `
@@ -1357,8 +1373,8 @@ function renderSettings() {
     </div>`;
 
   return `
-    <button class="link" data-action="nav" data-view="profile">‹ Profil</button>
-    <h1>Innstillinger</h1>
+    <button class="link" data-action="nav" data-view="settings">‹ Innstillinger</button>
+    <h1>Farger og tema</h1>
     <h2>Mine temaer</h2>
     <div class="slots" id="slots">${slotsHtml()}</div>
     <h2 class="section">Ferdige temaer</h2>
@@ -1392,10 +1408,10 @@ const VIEWS = {
   programs: renderPrograms, program: renderProgram, workout: renderWorkout,
   library: renderLibrary, exercise: renderExercise, stats: renderStats,
   session: renderSession, history: renderHistory, historyEdit: renderHistoryEdit,
-  profile: renderProfile, settings: renderSettings, cardioWorkout: renderCardioWorkout,
+  profile: renderProfile, settings: renderSettings, colors: renderColors, cardioWorkout: renderCardioWorkout,
 };
 
-const TAB_OF = { program: 'programs', workout: 'programs', cardioWorkout: 'programs', exercise: 'library', stats: 'profile', settings: 'profile', historyEdit: 'history' };
+const TAB_OF = { program: 'programs', workout: 'programs', cardioWorkout: 'programs', exercise: 'library', stats: 'profile', settings: 'profile', colors: 'profile', historyEdit: 'history' };
 
 function render() {
   const html = VIEWS[view.name]();

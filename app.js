@@ -28,8 +28,8 @@ const EQUIPMENT = [
 
 // Type cardioøvelse (lagres i feltet "kind")
 const KINDS = [
-  { id: 'intervall', name: 'Intervaller' },
   { id: 'tur',       name: 'Tur' },
+  { id: 'intervall', name: 'Intervaller' },
 ];
 
 // Kategori for cardio (lagres i feltet "sport")
@@ -49,9 +49,35 @@ const ICONS = {
   cardio: '<svg viewBox="0 0 24 24"><path d="M20.4 12.6c1.8-2.4 1.6-6-.8-7.6-2.4-1.6-5.4-.7-7.6 2-2.2-2.7-5.2-3.6-7.6-2-2.4 1.6-2.6 5.2-.8 7.6"/><path d="M3 12.5h4l1.8-3 3 6 2-4.2 1.2 1.2H21"/><path d="M6.5 15.8L12 20.5l5.5-4.7"/></svg>',
   // Søylediagram
   stats: '<svg viewBox="0 0 24 24"><path d="M4 20.5h16"/><path d="M6.5 17V12M11 17V6.5M15.5 17V9.5M20 17v-4" stroke-width="2.6"/></svg>',
+  // Forstørrelsesglass
+  search: '<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.4 15.4L20.5 20.5"/></svg>',
   // Glidebrytere
   settings: '<svg viewBox="0 0 24 24"><path d="M4 6.5h9M17 6.5h3M4 12h3M11 12h9M4 17.5h11M19 17.5h1"/><circle cx="15" cy="6.5" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17.5" r="2"/></svg>',
 };
+// Muskelgrupper i øvelsesbiblioteket
+// Felles figur (hode, overkropp og armer) for bryst, rygg og mage
+const FIGURE = '<circle cx="12" cy="4.2" r="2.2"/>' +
+  '<path d="M7.6 8.2c1.4-.9 7.4-.9 8.8 0"/>' +                       // skuldre
+  '<path d="M8.2 8.8l.8 11.4h6l.8-11.4"/>' +                         // overkropp
+  '<path d="M7.6 8.2c-1.6.4-2.4 1.6-2.6 3.6l-.4 6.4"/>' +            // venstre arm
+  '<path d="M16.4 8.2c1.6.4 2.4 1.6 2.6 3.6l.4 6.4"/>';              // høyre arm
+const MUSCLE_ICONS = {
+  // Flexet arm: overarm vannrett, albue ~90°, tydelig biceps og knyttneve
+  armer: '<svg viewBox="0 0 24 24"><path d="M3 14.6c1.4-.8 2.4-1.8 3-3 2-4 7-3.8 8.2.2L13 6.6c-.5-2 .5-3.6 2.5-3.6H17c1.8 0 2.8 1.3 2.5 3.3l.3 9.2c.2 2.7-1.2 4.3-3.8 4.3H3"/><path d="M13.4 6.4c1 .4 2.2.4 3.2 0"/><path d="M14.2 11.8c.6 1.2 1.6 1.8 2.8 2"/></svg>',
+  // Figur bakfra med V-form: brede skuldre, smal midje, ryggrad og skulderblader
+  rygg: '<svg viewBox="0 0 24 24"><circle cx="12" cy="4.2" r="2.2"/><path d="M6.4 8.2c1.8-1 9.4-1 11.2 0"/><path d="M6.8 8.8L10 20.2h4l3.2-11.4"/><path d="M6.4 8.2c-1.6.4-2.4 1.6-2.6 3.6l-.4 6.4M17.6 8.2c1.6.4 2.4 1.6 2.6 3.6l.4 6.4"/><path d="M12 9.5v9"/><path d="M9.2 10.2c.4 1.4 1.2 2.1 2.1 2.2M14.8 10.2c-.4 1.4-1.2 2.1-2.1 2.2"/></svg>',
+  // Zoomet inn på brystet
+  bryst: `<svg viewBox="5.5 6.8 13 13"><g stroke-width="1.15">${FIGURE}</g><path d="M8.6 10.3c1.1 1.8 2.4 2.2 3.4 1.3 1 .9 2.3.5 3.4-1.3" stroke-width="1.4"/></svg>`,
+  // Skulder (tykk) med flexet arm
+  skuldre: '<svg viewBox="0 0 24 24"><path d="M1.8 6.2c1.6.7 2.9 1.8 3.8 3.3"/><path d="M4.6 11.2c.6-3.4 5.4-3.8 6.6-.4" stroke-width="3.2"/><path d="M11.2 10.8c1.4-2 4.4-2 5.3.8l-.9-4.8c-.3-1.8.4-2.8 2-2.8h1.2c1.5 0 2.2 1 2 2.6l.4 6.8c.1 1.9-.9 2.9-2.8 2.9H5.2"/><path d="M5 11.6V21"/><path d="M15.9 6.4c.9.3 2 .3 2.9 0"/></svg>',
+  // To bein
+  bein: '<svg viewBox="0 0 24 24"><path d="M6.5 3c-.5 4 0 7 1 9.5L7 21h3l1-8.5L11.5 3"/><path d="M17.5 3c.5 4 0 7-1 9.5L17 21h-3l-1-8.5L12.5 3"/></svg>',
+  // Sixpack
+  // Figur forfra: sixpack
+  mage: `<svg viewBox="0 0 24 24">${FIGURE}<path d="M12 10.8v7M10 12.2h4M10 14.6h4M10 17h4"/></svg>`,
+  '': '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><path d="M9.5 9.8a2.5 2.5 0 1 1 3.3 2.4c-.5.2-.8.6-.8 1.1v.7M12 16.6v.01"/></svg>',
+};
+
 const icon = name => `<span class="ic">${ICONS[name]}</span>`;
 
 const MODES = [
@@ -303,7 +329,8 @@ function cardioNumbers(s) {
 function setText(s) {
   if (isIntervalSet(s)) {
     const { secs, speed } = cardioNumbers(s);
-    return `${secs ? fmtClock(secs) : '–'} @ ${speed ? `${fmt(speed)} km/t (${fmtPace(3600 / speed)})` : '–'}`;
+    return [secs ? fmtClock(secs) : '–', speed ? `${fmt(speed)} km/t` : '', speed ? fmtPace(3600 / speed) : '']
+      .filter(Boolean).join(' · ');
   }
   if (isTurSet(s)) {
     const { secs, dist, speed } = cardioNumbers(s);
@@ -401,7 +428,7 @@ let cwEditOpen = false; // «Rediger økt» er lukket til vanlig
 const getCw = id => db.cardioWorkouts.find(w => w.id === id);
 const currentCw = () => (view.id ? getCw(view.id) : cwDraft);
 const newCardioDraft = () => ({
-  id: null, name: '', sport: 'loping', kind: 'intervall', plan: 'fast',
+  id: null, name: '', sport: 'loping', kind: 'tur', plan: 'fast',
   work: '4', rest: '2', rounds: '4', sets: [{ work: '4', rest: '2' }],
 });
 
@@ -459,7 +486,8 @@ function exercisePicker(target, type) {
   }
   return `
     <div class="picker" data-target="${target}" data-type="${type}">
-      <input type="search" placeholder="🔍 Søk og legg til øvelse…" autocomplete="off" data-picker-input>
+      <label class="search">${ICONS.search}
+        <input type="search" placeholder="Søk og legg til øvelse…" autocomplete="off" data-picker-input></label>
       <div class="picker-results"></div>
     </div>`;
 }
@@ -919,7 +947,7 @@ function libraryGroupsHtml() {
     const list = sorted.filter(e => groupOf(e) === g.id);
     return `
       <details class="group" data-cat="${type}-${g.id}" ${openCats.has(`${type}-${g.id}`) ? 'open' : ''}>
-        <summary><strong>${esc(g.name)}</strong><span class="muted">${list.length}</span></summary>
+        <summary><span class="menu-row"><span class="menu-ico">${MUSCLE_ICONS[g.id] ?? MUSCLE_ICONS['']}</span><strong>${esc(g.name)}</strong></span><span class="muted">${list.length}</span></summary>
         <div class="group-body">${list.map(e => libraryItem(e, false)).join('') ||
           '<div class="muted small" style="padding:0 4px 8px">Ingen øvelser ennå</div>'}</div>
       </details>`;
@@ -937,7 +965,8 @@ function renderLibrary() {
       </form>
     </details>
     <h2 class="section">Øvelsesbibliotek</h2>
-    <input type="search" placeholder="🔍 Søk i biblioteket…" autocomplete="off" data-lib-search value="${esc(libQuery)}" style="margin-bottom:10px">
+    <label class="search" style="margin-bottom:10px">${ICONS.search}
+      <input type="search" placeholder="Søk i biblioteket…" autocomplete="off" data-lib-search value="${esc(libQuery)}"></label>
     <div id="lib-groups">${libraryGroupsHtml()}</div>`;
 }
 
@@ -1015,7 +1044,7 @@ function renderExercise() {
     <div class="muted" style="margin-bottom:16px">${esc(exLabel(ex))}</div>
     ${ex.type === 'cardio' ? cardioExerciseStats(ex, entries) : strengthExerciseStats(ex, entries)}
 
-    <h2 class="section">Historikk</h2>
+    <h2 class="section">Logg</h2>
     ${historyHtml || '<p class="empty">Ingen fullførte økter med denne øvelsen ennå.</p>'}
 
     <details class="card section">
@@ -1191,7 +1220,7 @@ function renderHistory() {
   const seg = [['alle', 'Alle'], ['styrke', 'Styrke'], ['cardio', 'Cardio']].map(([f, label]) =>
     `<button class="${historyFilter === f ? 'active' : ''}" data-action="history-filter" data-f="${f}">${label}</button>`).join('');
   return `
-    <h1>Historikk</h1>
+    <h1>Logg</h1>
     <div class="seg">${seg}</div>
     ${items || '<p class="empty">Ingen fullførte økter her ennå.</p>'}`;
 }
@@ -1200,7 +1229,7 @@ function renderHistoryEdit() {
   const d = editDraft;
   if (!d) return go({ name: 'history' });
   return `
-    <button class="link" data-action="nav" data-view="history">‹ Historikk</button>
+    <button class="link" data-action="nav" data-view="history">‹ Logg</button>
     <h1 style="margin-bottom:4px">Rediger økt</h1>
     <div class="muted" style="margin-bottom:16px">${[esc(d.workoutName), esc(d.programName)].filter(Boolean).join(' · ')}</div>
     <div class="card stack">
@@ -1441,14 +1470,14 @@ const actions = {
 
   'delete-program': async () => {
     const p = getProgram(view.programId);
-    if (!await ask(`Slette «${p.name}»?`, 'Programmet og alle øktene i det slettes. Historikken beholdes.', { ok: 'Slett program' })) return;
+    if (!await ask(`Slette «${p.name}»?`, 'Programmet og alle øktene i det slettes. Loggen beholdes.', { ok: 'Slett program' })) return;
     db.programs = db.programs.filter(x => x !== p);
     save(); go({ name: 'programs' });
   },
   'delete-workout': async () => {
     const p = getProgram(view.programId);
     const w = getWorkout(view.programId, view.workoutId);
-    if (!await ask(`Slette «${w.name}»?`, 'Økta fjernes fra programmet. Historikken beholdes.', { ok: 'Slett økt' })) return;
+    if (!await ask(`Slette «${w.name}»?`, 'Økta fjernes fra programmet. Loggen beholdes.', { ok: 'Slett økt' })) return;
     p.workouts = p.workouts.filter(x => x !== w);
     save(); go({ name: 'program', programId: p.id });
   },
@@ -1464,7 +1493,7 @@ const actions = {
   },
   'delete-exercise': async () => {
     const e = getExercise(view.exerciseId);
-    if (!await ask(`Slette «${e.name}»?`, 'Den fjernes fra biblioteket og fra øktene den er lagt i. Historikken beholdes.', { ok: 'Slett øvelse' })) return;
+    if (!await ask(`Slette «${e.name}»?`, 'Den fjernes fra biblioteket og fra øktene den er lagt i. Loggen beholdes.', { ok: 'Slett øvelse' })) return;
     db.exercises = db.exercises.filter(x => x !== e);
     db.programs.forEach(p => p.workouts.forEach(w => {
       w.exerciseIds = w.exerciseIds.filter(id => id !== e.id);
@@ -1544,7 +1573,7 @@ const actions = {
   },
   'delete-cw': async () => {
     const w = getCw(view.id);
-    if (!await ask(`Slette «${w.name}»?`, 'Økta slettes. Historikken beholdes.', { ok: 'Slett økt' })) return;
+    if (!await ask(`Slette «${w.name}»?`, 'Økta slettes. Loggen beholdes.', { ok: 'Slett økt' })) return;
     db.cardioWorkouts = db.cardioWorkouts.filter(x => x !== w);
     save(); go({ name: 'programs' });
   },
@@ -1617,7 +1646,7 @@ const actions = {
     render();
   },
   'finish-session': async () => {
-    if (!await ask('Fullføre økta?', 'Økta lagres i historikken.', { ok: 'Fullfør økt', danger: false })) return;
+    if (!await ask('Fullføre økta?', 'Økta lagres i loggen.', { ok: 'Fullfør økt', danger: false })) return;
     stopStopwatch();
     stopIntervalTimer();
     const a = db.active;
@@ -1679,7 +1708,7 @@ const actions = {
   },
   'delete-history': async d => {
     const h = db.history.find(x => x.id === d.id);
-    if (!await ask(`Slette «${h.workoutName}»?`, `Økta fra ${formatDate(h.startedAt)} slettes fra historikken for godt.`, { ok: 'Slett økt' })) return;
+    if (!await ask(`Slette «${h.workoutName}»?`, `Økta fra ${formatDate(h.startedAt)} slettes fra loggen for godt.`, { ok: 'Slett økt' })) return;
     db.history = db.history.filter(x => x.id !== d.id);
     save(); render();
   },

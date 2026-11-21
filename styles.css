@@ -82,11 +82,28 @@ h3 { font-size: 1.05rem; margin: 0 0 6px; }
 #nav button.active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 #nav button.active svg { stroke-width: 2.3; }
 #nav button:active .ico { transform: scale(.92); }
+/* Tastaturet er oppe: menylinja blir liggende nede bak tastaturet */
+body.kb-open #nav { display: none; }
 
 .theme-ico svg {
   width: 26px; height: 26px; fill: none; stroke: currentColor;
   stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; display: block;
 }
+
+/* Små ikoner (styrke, cardio, statistikk, innstillinger) */
+.ic svg, .menu-ico svg {
+  fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; display: block;
+}
+.ic { display: inline-block; vertical-align: -4px; margin-right: 7px; }
+.ic svg { width: 19px; height: 19px; }
+.seg button .ic { color: var(--muted); }
+.seg button.active .ic { color: var(--accent); }
+.menu-row { display: flex; align-items: center; gap: 12px; }
+.menu-ico {
+  display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent);
+}
+.menu-ico svg { width: 20px; height: 20px; }
 
 /* Opprett ny øvelse (sammenleggbar) */
 .new-ex summary { display: flex; justify-content: space-between; align-items: center; cursor: pointer; list-style: none; }

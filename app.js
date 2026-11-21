@@ -41,9 +41,22 @@ const SPORTS = [
   { id: 'roing',    name: 'Roing' },
 ];
 
+// Små ikoner i samme strekstil som menylinja
+const ICONS = {
+  // Kettlebell
+  styrke: '<svg viewBox="0 0 24 24"><path d="M7.4 11.2C6 5.5 8.4 3.3 12 3.3s6 2.2 4.6 7.9"/><path d="M8.6 9.8c.4-2.3 1.6-3.2 3.4-3.2s3 .9 3.4 3.2"/><path d="M8.8 20.8a6.4 6.4 0 1 1 6.4 0z"/></svg>',
+  // Hjerte med puls
+  cardio: '<svg viewBox="0 0 24 24"><path d="M20.4 12.6c1.8-2.4 1.6-6-.8-7.6-2.4-1.6-5.4-.7-7.6 2-2.2-2.7-5.2-3.6-7.6-2-2.4 1.6-2.6 5.2-.8 7.6"/><path d="M3 12.5h4l1.8-3 3 6 2-4.2 1.2 1.2H21"/><path d="M6.5 15.8L12 20.5l5.5-4.7"/></svg>',
+  // Søylediagram
+  stats: '<svg viewBox="0 0 24 24"><path d="M4 20.5h16"/><path d="M6.5 17V12M11 17V6.5M15.5 17V9.5M20 17v-4" stroke-width="2.6"/></svg>',
+  // Glidebrytere
+  settings: '<svg viewBox="0 0 24 24"><path d="M4 6.5h9M17 6.5h3M4 12h3M11 12h9M4 17.5h11M19 17.5h1"/><circle cx="15" cy="6.5" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17.5" r="2"/></svg>',
+};
+const icon = name => `<span class="ic">${ICONS[name]}</span>`;
+
 const MODES = [
-  { id: 'styrke', name: '🏋️ Styrke' },
-  { id: 'cardio', name: '🏃 Cardio' },
+  { id: 'styrke', name: 'Styrke' },
+  { id: 'cardio', name: 'Cardio' },
 ];
 
 // Oppsett for intervalløkter
@@ -247,6 +260,22 @@ function fmtClock(secs) {
   const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = secs % 60;
   return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
+// Klokkefelt: sifrene fylles inn fra høyre (iPhone-tastaturet har ikke kolon).
+// «4» -> 00:04, «430» -> 04:30, «13000» -> 1:30:00
+function clockDigits(v) {
+  const d = String(v ?? '').replace(/\D/g, '').replace(/^0+/, '').slice(0, 6);
+  if (!d) return '';
+  const p = d.padStart(4, '0');
+  return p.length <= 4 ? `${p.slice(0, 2)}:${p.slice(2)}` : `${p.slice(0, -4)}:${p.slice(-4, -2)}:${p.slice(-2)}`;
+}
+// Lagret tid (f.eks. «4», «4:30», «1:05:30») -> visning i klokkefelt
+function clockValue(v) {
+  const s = Math.round(parseDuration(v));
+  if (!s) return '';
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${pad(m)}:${pad(s % 60)}`;
+}
+
 const fmtPace = secPerKm => (isFinite(secPerKm) && secPerKm > 0 ? `${fmtClock(secPerKm)} /km` : '–');
 
 const formatDate = ts => new Date(ts).toLocaleString('nb-NO', {
@@ -489,7 +518,7 @@ function exerciseFormFields(ex = {}, type = 'styrke') {
 
 const modeSwitch = () => `
   <div class="seg mode-seg">${MODES.map(m =>
-    `<button class="${mode() === m.id ? 'active' : ''}" data-action="set-mode" data-mode="${m.id}">${m.name}</button>`).join('')}
+    `<button class="${mode() === m.id ? 'active' : ''}" data-action="set-mode" data-mode="${m.id}">${icon(m.id)}${m.name}</button>`).join('')}
   </div>`;
 
 // ---------- Sett-kort (pågående økt og redigering) ----------
@@ -661,8 +690,8 @@ function intervalRows(ex, i, scope) {
   const rows = ex.sets.map((s, j) => `
     <div class="set-grid cardio">
       <span class="num">${j + 1}</span>
-      <input type="text" inputmode="decimal" autocomplete="off" placeholder="m:ss" value="${esc(s.duration)}" ${fieldAttrs(scope, i, j, 'duration')}>
-      <input type="text" inputmode="decimal" autocomplete="off" placeholder="m:ss" value="${esc(s.rest ?? '')}" ${fieldAttrs(scope, i, j, 'rest')}>
+      <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="00:00" value="${esc(clockValue(s.duration))}" ${fieldAttrs(scope, i, j, 'duration')} data-clock>
+      <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="00:00" value="${esc(clockValue(s.rest))}" ${fieldAttrs(scope, i, j, 'rest')} data-clock>
       <input type="text" inputmode="decimal" autocomplete="off" placeholder="km/t" value="${esc(s.speed)}" ${fieldAttrs(scope, i, j, 'speed')}>
       <span class="tempo" data-info="${scope}-${i}-${j}">${cardioInfo(s)}</span>
       <button class="danger" data-action="remove-set" data-scope="${scope}" data-i="${i}" data-s="${j}" aria-label="Fjern intervall">✕</button>
@@ -681,8 +710,8 @@ function turFields(ex, i, scope) {
     <div class="tur-grid">
       <label class="field"><span class="muted small">Distanse (km)</span>
         <input type="text" inputmode="decimal" autocomplete="off" placeholder="km" value="${esc(s.distance)}" ${fieldAttrs(scope, i, 0, 'distance')}></label>
-      <label class="field"><span class="muted small">Tid (min eller t:mm:ss)</span>
-        <input type="text" inputmode="decimal" autocomplete="off" placeholder="t:mm:ss" value="${esc(s.duration)}" ${fieldAttrs(scope, i, 0, 'duration')}></label>
+      <label class="field"><span class="muted small">Tid (0430 = 04:30)</span>
+        <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="00:00" value="${esc(clockValue(s.duration))}" ${fieldAttrs(scope, i, 0, 'duration')} data-clock></label>
     </div>
     <div class="tur-result" data-info="${scope}-${i}-0">${cardioInfo(s)}</div>`;
 }
@@ -732,9 +761,14 @@ function renderCardioWorkout() {
     <div class="seg ${cls}">${list.map(o =>
       `<button class="${w[key] === o.id ? 'active' : ''}" data-action="cw-set" data-k="${key}" data-v="${o.id}">${o.name}</button>`).join('')}
     </div>`;
-  const inp = (key, ph, i, mode = 'decimal') => `
-    <input type="text" inputmode="${mode}" autocomplete="off" placeholder="${ph}"
-           value="${esc(i === null ? w[key] : w.sets[i][key])}" data-cw="${key}" ${i === null ? '' : `data-i="${i}"`}>`;
+  // Tidsfelt (work/rest) bruker «klokkefelt» som fylles fra høyre: 0430 -> 04:30
+  const inp = (key, ph, i) => {
+    const clock = key !== 'rounds';
+    const v = i === null ? w[key] : w.sets[i][key];
+    return `
+      <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="${clock ? '00:00' : ph}"
+             value="${esc(clock ? clockValue(v) : v)}" data-cw="${key}" ${i === null ? '' : `data-i="${i}"`} ${clock ? 'data-clock' : ''}>`;
+  };
 
   let plan = '';
   if (w.kind === 'intervall') {
@@ -742,7 +776,7 @@ function renderCardioWorkout() {
       <div class="iv-setup">
         <label class="field"><span class="muted small">Aktiv tid</span>${inp('work', '4:00', null)}</label>
         <label class="field"><span class="muted small">Pause</span>${inp('rest', '2:00', null)}</label>
-        <label class="field"><span class="muted small">Antall sett</span>${inp('rounds', '4', null, 'numeric')}</label>
+        <label class="field"><span class="muted small">Antall sett</span>${inp('rounds', '4', null)}</label>
       </div>` : `
       <div class="set-grid dyn head"><span class="num">Sett</span><span>Aktiv tid</span><span>Pause</span><span></span></div>
       ${w.sets.map((s, i) => `
@@ -757,7 +791,7 @@ function renderCardioWorkout() {
       <div class="field-label">Intervaller</div>
       ${seg('plan', PLANS)}
       ${body}
-      <div class="muted small">Tid skrives i minutter («4») eller min:sek («1:30»).</div>`;
+      <div class="muted small">Skriv tallene etter hverandre, f.eks. 0430 = 04:30.</div>`;
   }
 
   const fields = `
@@ -1108,7 +1142,7 @@ function renderStats() {
     <button class="link" data-action="nav" data-view="profile">‹ Profil</button>
     <h1>Statistikk</h1>
     <div class="seg mode-seg">${MODES.map(m =>
-      `<button class="${statsState.type === m.id ? 'active' : ''}" data-action="stats-type" data-t="${m.id}">${m.name}</button>`).join('')}
+      `<button class="${statsState.type === m.id ? 'active' : ''}" data-action="stats-type" data-t="${m.id}">${icon(m.id)}${m.name}</button>`).join('')}
     </div>
     <div class="seg" id="stats-periods">${statsPeriodsHtml()}</div>
     <label class="days-row">
@@ -1215,10 +1249,10 @@ function renderProfile() {
   return `
     <h1>Profil</h1>
     <div class="list-item clickable" data-action="nav" data-view="stats">
-      <strong>📊 Statistikk</strong><span class="muted">›</span>
+      <span class="menu-row"><span class="menu-ico">${ICONS.stats}</span><strong>Statistikk</strong></span><span class="muted">›</span>
     </div>
     <div class="list-item clickable" data-action="nav" data-view="settings">
-      <strong>⚙️ Innstillinger</strong><span class="muted">›</span>
+      <span class="menu-row"><span class="menu-ico">${ICONS.settings}</span><strong>Innstillinger</strong></span><span class="muted">›</span>
     </div>
     <h2 class="section">Kroppsvekt</h2>
     ${latest ? `
@@ -1338,6 +1372,7 @@ function render() {
   const html = VIEWS[view.name]();
   if (html === undefined) return; // go() har allerede rendret
   document.getElementById('app').innerHTML = html;
+  if (!typesKeyboard(document.activeElement)) document.body.classList.remove('kb-open');
   renderHeader();
   const tab = TAB_OF[view.name] ?? view.name;
   document.querySelectorAll('#nav button').forEach(b =>
@@ -1797,6 +1832,29 @@ document.addEventListener('toggle', e => {
   e.target.open ? openCats.add(cat) : openCats.delete(cat);
 }, true);
 
+// Skjul menylinja mens tastaturet er oppe (ellers legger iPhone den rett over tastaturet)
+const typesKeyboard = el => el.matches?.('textarea, input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=range]):not([type=button])');
+let kbTimer = null;
+document.addEventListener('focusin', e => {
+  if (!typesKeyboard(e.target)) return;
+  clearTimeout(kbTimer);
+  document.body.classList.add('kb-open');
+});
+document.addEventListener('focusout', e => {
+  if (!typesKeyboard(e.target)) return;
+  // Liten forsinkelse, så baren ikke blinker når man hopper mellom felt
+  kbTimer = setTimeout(() => {
+    if (!typesKeyboard(document.activeElement)) document.body.classList.remove('kb-open');
+  }, 150);
+});
+
+// Klokkefelt: marker innholdet ved trykk, så nye tall erstatter den gamle tiden
+document.addEventListener('focusin', e => {
+  const el = e.target;
+  if (el.dataset?.clock === undefined || !el.value) return;
+  setTimeout(() => el.setSelectionRange?.(0, el.value.length), 0);
+});
+
 // Vis treff når søkefeltet for å legge til øvelse får fokus
 document.addEventListener('focusin', e => {
   if (!e.target.matches('[data-picker-input]')) return;
@@ -1806,6 +1864,12 @@ document.addEventListener('focusin', e => {
 
 document.addEventListener('input', e => {
   const el = e.target;
+
+  // Klokkefelt: formater mens man skriver, og hold markøren på slutten
+  if (el.dataset.clock !== undefined) {
+    el.value = clockDigits(el.value);
+    el.setSelectionRange?.(el.value.length, el.value.length);
+  }
 
   // Søk når man legger til øvelse
   if (el.matches('[data-picker-input]')) {

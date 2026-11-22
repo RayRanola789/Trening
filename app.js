@@ -19,6 +19,7 @@ const CATEGORIES = [
 const EQUIPMENT = [
   { id: 'maskin',   name: 'Maskin' },
   { id: 'barbell',  name: 'Barbell' },
+  { id: 'smith',    name: 'Smith' },
   { id: 'dumbbell', name: 'Dumbbell' },
   { id: 'cable',    name: 'Cable' },
   { id: 'annet',    name: 'Annet' },
@@ -51,6 +52,10 @@ const ICONS = {
   stats: '<svg viewBox="0 0 24 24"><path d="M4 20.5h16"/><path d="M6.5 17V12M11 17V6.5M15.5 17V9.5M20 17v-4" stroke-width="2.6"/></svg>',
   // Forstørrelsesglass
   search: '<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.4 15.4L20.5 20.5"/></svg>',
+  // Blyant
+  edit: '<svg viewBox="0 0 24 24"><path d="M4 20l1-4.5L15.5 5a2.1 2.1 0 0 1 3 3L8 18.5z"/><path d="M13.5 7l3 3"/></svg>',
+  // Dra-håndtak
+  grip: '<svg viewBox="0 0 24 24"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" stroke-width="3.2"/></svg>',
   // Malerpalett
   palette: '<svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0 0 17c1.3 0 2-.8 2-1.8 0-1.3-1.2-1.7-1.2-2.9 0-1 .8-1.8 1.8-1.8h2.2a3.7 3.7 0 0 0 3.7-3.7C20.5 6.6 16.7 3.5 12 3.5z"/><circle cx="7.8" cy="11" r="1.1"/><circle cx="10.2" cy="7.3" r="1.1"/><circle cx="14.6" cy="7.6" r="1.1"/></svg>',
   // Glidebrytere
@@ -421,6 +426,45 @@ function ask(title, message = '', { ok = 'Slett', cancel = 'Avbryt', danger = tr
     requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('open')));
   });
 }
+// Ark med tekstfelt (f.eks. endre navn). Gir den nye teksten, eller null ved avbryt.
+function askText(title, value = '', { ok = 'Lagre', placeholder = '' } = {}) {
+  return new Promise(resolve => {
+    const el = document.createElement('div');
+    el.className = 'sheet-backdrop';
+    el.innerHTML = `
+      <form class="sheet" role="dialog" aria-modal="true">
+        <div class="sheet-group">
+          <div class="sheet-msg">
+            <strong>${esc(title)}</strong>
+            <input type="text" class="sheet-input" value="${esc(value)}" placeholder="${esc(placeholder)}" autocomplete="off">
+          </div>
+          <button class="sheet-btn" type="submit">${esc(ok)}</button>
+        </div>
+        <button class="sheet-btn cancel" type="button" data-r="0">Avbryt</button>
+      </form>`;
+    const input = el.querySelector('input');
+    const close = v => {
+      el.classList.remove('open');
+      input.blur();
+      setTimeout(() => el.remove(), 250);
+      resolve(v);
+    };
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      if (e.target.closest('[data-r]') || e.target === el) close(null);
+    });
+    el.querySelector('form').addEventListener('submit', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      close(input.value.trim() || null);
+    });
+    document.body.appendChild(el);
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('open')));
+    input.focus();
+    input.select();
+  });
+}
+
 const notice = (title, message) => ask(title, message, { ok: 'OK', cancel: '', danger: false });
 
 // ---------- Cardioøkter ----------
@@ -538,7 +582,10 @@ function exerciseFormFields(ex = {}, type = 'styrke') {
     <select name="category" required>${options(CATEGORIES, ex.category, 'Velg muskelgruppe')}</select>
     <div class="sub-picker">${subPickerHtml(ex.category, ex.subs)}</div>
     <div class="row">
-      <select name="equipment" required>${options(EQUIPMENT, ex.equipment, 'Velg kategori')}</select>
+      <select name="equipment">
+        <option value="" ${ex.equipment ? '' : 'selected'}>Kategori (valgfri)</option>
+        ${EQUIPMENT.map(c => `<option value="${c.id}" ${ex.equipment === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+      </select>
       <label class="switch-inline">
         <span>På tid</span>
         <input type="checkbox" name="timed" class="switch" role="switch" ${ex.timed ? 'checked' : ''}>
@@ -888,7 +935,7 @@ function renderProgram() {
   return `
     ${modeSwitch()}
     <button class="link" data-action="all-programs">‹ Alle program</button>
-    <h1>${esc(p.name)}</h1>
+    <h1 class="title-row">${esc(p.name)}${renameBtn('program')}</h1>
     ${items || '<p class="empty">Ingen økter i dette programmet ennå.</p>'}
     <form class="row section" data-form="new-workout">
       <input name="name" placeholder="${p.type === 'cardio' ? 'Ny økt, f.eks. «Intervalldag»' : 'Ny økt, f.eks. «Push dag»'}" required>
@@ -897,6 +944,9 @@ function renderProgram() {
     <div class="section"><button class="soft-danger big" data-action="delete-program">Slett program</button></div>`;
 }
 
+const renameBtn = what => `
+  <button class="icon-btn" data-action="rename" data-what="${what}" aria-label="Endre navn">${ICONS.edit}</button>`;
+
 function renderWorkout() {
   const p = getProgram(view.programId);
   const w = getWorkout(view.programId, view.workoutId);
@@ -904,20 +954,19 @@ function renderWorkout() {
   const items = w.exerciseIds.map((id, i) => {
     const e = getExercise(id);
     return `
-      <div class="list-item">
-        <div class="grow">${i + 1}. ${esc(exName(id))}
+      <div class="list-item" data-drag-item>
+        <span class="drag-handle" aria-label="Dra for å flytte">${ICONS.grip}</span>
+        <div class="grow">${esc(exName(id))}
           <div class="muted small">${e ? esc(exLabel(e)) : ''}</div></div>
-        <span class="row tight">
-          <button data-action="move-ex" data-i="${i}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Flytt opp">↑</button>
-          <button data-action="move-ex" data-i="${i}" data-dir="1" ${i === w.exerciseIds.length - 1 ? 'disabled' : ''} aria-label="Flytt ned">↓</button>
-          <button class="remove" data-action="remove-ex" data-i="${i}">Fjern</button>
-        </span>
+        <button class="remove" data-action="remove-ex" data-i="${i}">Fjern</button>
       </div>`;
   }).join('');
   return `
     <button class="link" data-action="open-program" data-id="${p.id}">‹ ${esc(p.name)}</button>
-    <h1>${esc(w.name)}</h1>
-    ${items || '<p class="empty">Ingen øvelser ennå. Søk opp og legg til under.</p>'}
+    <h1 class="title-row">${esc(w.name)}${renameBtn('workout')}</h1>
+    ${items ? `<div class="drag-list" data-drag-list="workout">${items}</div>
+      ${w.exerciseIds.length > 1 ? '<div class="muted small" style="margin-top:-2px">Hold i ⠿ og dra for å endre rekkefølge.</div>' : ''}`
+      : '<p class="empty">Ingen øvelser ennå. Søk opp og legg til under.</p>'}
     <div class="section">${exercisePicker('add-ex-to-workout', p.type)}</div>
     <div class="section">
       <button class="primary big" data-action="start-session" ${w.exerciseIds.length ? '' : 'disabled'}>▶ Start økt</button>
@@ -1484,6 +1533,18 @@ const actions = {
     save(); render();
   },
 
+  'rename': async d => {
+    const isProgram = d.what === 'program';
+    const obj = isProgram ? getProgram(view.programId) : getWorkout(view.programId, view.workoutId);
+    const name = await askText(isProgram ? 'Endre navn på program' : 'Endre navn på økt', obj.name);
+    if (!name || name === obj.name) return;
+    obj.name = name;
+    // Pågående økt fra dette programmet / denne økta får også nytt navn
+    if (db.active && (isProgram ? db.active.programId === obj.id : db.active.workoutId === obj.id)) {
+      db.active[isProgram ? 'programName' : 'workoutName'] = name;
+    }
+    save(); render();
+  },
   'delete-program': async () => {
     const p = getProgram(view.programId);
     if (!await ask(`Slette «${p.name}»?`, 'Programmet og alle øktene i det slettes. Loggen beholdes.', { ok: 'Slett program' })) return;
@@ -1497,8 +1558,10 @@ const actions = {
     p.workouts = p.workouts.filter(x => x !== w);
     save(); go({ name: 'program', programId: p.id });
   },
-  'remove-ex': d => {
-    getWorkout(view.programId, view.workoutId).exerciseIds.splice(+d.i, 1);
+  'remove-ex': async d => {
+    const w = getWorkout(view.programId, view.workoutId);
+    if (!await ask(`Fjerne «${exName(w.exerciseIds[+d.i])}»?`, `Øvelsen fjernes fra «${w.name}». Den ligger fortsatt i øvelsesbiblioteket.`, { ok: 'Fjern øvelse' })) return;
+    w.exerciseIds.splice(+d.i, 1);
     save(); render();
   },
   'move-ex': d => {
@@ -1653,9 +1716,8 @@ const actions = {
   'remove-card-ex': async d => {
     const list = setTarget(d.scope).exercises;
     const ex = list[+d.i];
-    // Spør bare hvis det er logget noe på øvelsen
-    if (ex.sets.some(hasData) &&
-        !await ask(`Fjerne «${ex.name}»?`, 'Det du har logget på denne øvelsen forsvinner.', { ok: 'Fjern øvelse' })) return;
+    const msg = ex.sets.some(hasData) ? 'Det du har logget på denne øvelsen forsvinner.' : 'Øvelsen fjernes fra denne økta.';
+    if (!await ask(`Fjerne «${ex.name}»?`, msg, { ok: 'Fjern øvelse' })) return;
     if (d.scope === 'active') { stopStopwatch(); stopIntervalTimer(); }
     list.splice(+d.i, 1);
     if (d.scope === 'active') save();
@@ -1892,6 +1954,65 @@ document.addEventListener('focusout', e => {
     if (!typesKeyboard(document.activeElement)) document.body.classList.remove('kb-open');
   }, 150);
 });
+
+// ---------- Dra for å endre rekkefølge ----------
+// Lister merket data-drag-list, med rader merket data-drag-item og et .drag-handle i hver rad
+const DRAG_LISTS = {
+  workout: (from, to) => {
+    const ids = getWorkout(view.programId, view.workoutId).exerciseIds;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+  },
+};
+let drag = null;
+const dragItems = list => [...list.querySelectorAll(':scope > [data-drag-item]')];
+
+document.addEventListener('pointerdown', e => {
+  const handle = e.target.closest('.drag-handle');
+  if (!handle) return;
+  const item = handle.closest('[data-drag-item]');
+  const list = item?.parentElement;
+  if (!list?.dataset.dragList) return;
+  e.preventDefault();
+  handle.setPointerCapture?.(e.pointerId);
+  drag = { item, list, from: dragItems(list).indexOf(item), startY: e.clientY, startTop: item.getBoundingClientRect().top };
+  item.classList.add('dragging');
+  list.classList.add('is-dragging');
+  document.body.classList.add('no-select');
+});
+
+document.addEventListener('pointermove', e => {
+  if (!drag) return;
+  e.preventDefault();
+  const y = e.clientY;
+  const items = dragItems(drag.list);
+  const idx = items.indexOf(drag.item);
+  // Bytt plass med naboen når fingeren passerer midten av den
+  const prev = items[idx - 1], next = items[idx + 1];
+  if (prev && y < prev.getBoundingClientRect().top + prev.offsetHeight / 2) drag.list.insertBefore(drag.item, prev);
+  else if (next && y > next.getBoundingClientRect().top + next.offsetHeight / 2) drag.list.insertBefore(drag.item, next.nextSibling);
+  // Raden følger fingeren
+  drag.item.style.transform = '';
+  const natural = drag.item.getBoundingClientRect().top;
+  drag.item.style.transform = `translateY(${drag.startTop + (y - drag.startY) - natural}px)`;
+}, { passive: false });
+
+function endDrag() {
+  if (!drag) return;
+  const { item, list, from } = drag;
+  const to = dragItems(list).indexOf(item);
+  item.style.transform = '';
+  item.classList.remove('dragging');
+  list.classList.remove('is-dragging');
+  document.body.classList.remove('no-select');
+  drag = null;
+  if (to !== from) {
+    DRAG_LISTS[list.dataset.dragList]?.(from, to);
+    save();
+  }
+  render();
+}
+document.addEventListener('pointerup', endDrag);
+document.addEventListener('pointercancel', endDrag);
 
 // Klokkefelt: marker innholdet ved trykk, så nye tall erstatter den gamle tiden
 document.addEventListener('focusin', e => {

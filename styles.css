@@ -300,6 +300,32 @@ button.soft-danger:active { background: color-mix(in srgb, var(--danger) 22%, tr
   display: flex; flex-direction: column; gap: 4px;
 }
 .sheet-msg strong { font-size: 1rem; }
+.sheet-input { margin-top: 10px; width: 100%; text-align: left; }
+
+/* Overskrift med blyant for å endre navn */
+.title-row { display: flex; align-items: center; gap: 8px; }
+.icon-btn {
+  flex: none; display: grid; place-items: center; width: 36px; height: 36px; padding: 0;
+  border-radius: 10px; background: var(--card); color: var(--muted);
+}
+.icon-btn svg, .drag-handle svg {
+  width: 18px; height: 18px; fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* Dra for å endre rekkefølge */
+.drag-handle {
+  flex: none; display: grid; place-items: center; width: 34px; height: 40px; margin: -6px 4px -6px -6px;
+  color: var(--muted); touch-action: none; cursor: grab;
+}
+.drag-handle svg { width: 20px; height: 20px; }
+[data-drag-item] { position: relative; }
+[data-drag-item].dragging {
+  z-index: 5; background: var(--raised); box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  transition: none; opacity: .97;
+}
+.drag-list.is-dragging [data-drag-item]:not(.dragging) { transition: transform .15s; }
+body.no-select { -webkit-user-select: none; user-select: none; }
 .sheet-msg span { color: var(--muted); font-size: .85rem; line-height: 1.35; }
 .sheet-btn {
   display: block; width: 100%; border-radius: 0; background: none;

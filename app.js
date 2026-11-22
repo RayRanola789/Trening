@@ -391,13 +391,15 @@ function sessionEx(id) {
 const groupName = e => (e.type === 'cardio' ? kindName(e.kind) : catName(e.category));
 function exMeta(e) {
   if (e.type === 'cardio') return sportName(e.sport);
-  return [eqName(e.equipment), e.subs.join(', '), e.timed ? 'På tid' : ''].filter(Boolean).join(' · ');
+  return [e.subs.join(', '), e.timed ? 'På tid' : ''].filter(Boolean).join(' · ');
 }
 const exLabel = e => [groupName(e), exMeta(e)].filter(Boolean).join(' · ');
+// Navn med kategori i parentes, f.eks. «Benkpress (Barbell)»
+const exTitleHtml = e => `${esc(e.name)}${e.equipment ? ` <span class="eq">(${esc(eqName(e.equipment))})</span>` : ''}`;
 
 function matchesQuery(e, q) {
   if (!q) return true;
-  return [e.name, groupName(e), exMeta(e), ...e.subs].join(' ').toLowerCase().includes(q);
+  return [e.name, groupName(e), exMeta(e), eqName(e.equipment), ...e.subs].join(' ').toLowerCase().includes(q);
 }
 
 // Bekreftelsesark i iOS-stil (erstatter confirm/alert som viser nettadressen på iPhone).
@@ -430,44 +432,6 @@ function ask(title, message = '', { ok = 'Slett', cancel = 'Avbryt', danger = tr
     });
     document.body.appendChild(el);
     requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('open')));
-  });
-}
-// Ark med tekstfelt (f.eks. endre navn). Gir den nye teksten, eller null ved avbryt.
-function askText(title, value = '', { ok = 'Lagre', placeholder = '' } = {}) {
-  return new Promise(resolve => {
-    const el = document.createElement('div');
-    el.className = 'sheet-backdrop';
-    el.innerHTML = `
-      <form class="sheet" role="dialog" aria-modal="true">
-        <div class="sheet-group">
-          <div class="sheet-msg">
-            <strong>${esc(title)}</strong>
-            <input type="text" class="sheet-input" value="${esc(value)}" placeholder="${esc(placeholder)}" autocomplete="off">
-          </div>
-          <button class="sheet-btn" type="submit">${esc(ok)}</button>
-        </div>
-        <button class="sheet-btn cancel" type="button" data-r="0">Avbryt</button>
-      </form>`;
-    const input = el.querySelector('input');
-    const close = v => {
-      el.classList.remove('open');
-      input.blur();
-      setTimeout(() => el.remove(), 250);
-      resolve(v);
-    };
-    el.addEventListener('click', e => {
-      e.stopPropagation();
-      if (e.target.closest('[data-r]') || e.target === el) close(null);
-    });
-    el.querySelector('form').addEventListener('submit', e => {
-      e.preventDefault();
-      e.stopPropagation();
-      close(input.value.trim() || null);
-    });
-    document.body.appendChild(el);
-    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('open')));
-    input.focus();
-    input.select();
   });
 }
 
@@ -608,7 +572,8 @@ function exercisePicker(target, type) {
   return `
     <div class="picker" data-target="${target}" data-type="${type}">
       <label class="search">${ICONS.search}
-        <input type="search" placeholder="Søk og legg til øvelse…" autocomplete="off" data-picker-input></label>
+        <input type="search" placeholder="Søk og legg til øvelse…" autocomplete="off" data-picker-input>
+        <button type="button" class="picker-close" data-action="close-picker" aria-label="Lukk søk">✕</button></label>
       <div class="picker-results"></div>
     </div>`;
 }
@@ -624,7 +589,7 @@ function pickerResultsHtml(target, type, query) {
   }
   return list.map(e => `
     <div class="list-item clickable" data-action="pick-ex" data-target="${target}" data-id="${e.id}">
-      <div>${esc(e.name)}<div class="muted small">${esc(exLabel(e))}</div></div>
+      <div>${exTitleHtml(e)}<div class="muted small">${esc(exLabel(e))}</div></div>
       <span class="add">+</span>
     </div>`).join('');
 }
@@ -999,61 +964,102 @@ const freeStartHtml = () => `
     </button>
   </div>`;
 
+// ---------- Redigeringsmodus (blyanten ved navnet) ----------
+// Navnet kan endres, flere rader kan velges og slettes, og rekkefølgen kan dras.
+let editMode = false;
+const selected = new Set();
+
+// Overskrift: vanlig navn + blyant, eller tekstfelt + «Ferdig» i redigeringsmodus
+// Pågående økt fra dette programmet / denne økta får også nytt navn
+function renameActive(obj, isProgram) {
+  if (db.active && (isProgram ? db.active.programId === obj.id : db.active.workoutId === obj.id)) {
+    db.active[isProgram ? 'programName' : 'workoutName'] = obj.name;
+  }
+}
+
+const titleHtml = (name, what) => (editMode ? `
+  <div class="title-row edit">
+    <input type="text" class="title-input" value="${esc(name)}" data-rename-input="${what}" aria-label="Navn" autocomplete="off">
+    <button class="primary" data-action="edit-toggle">Ferdig</button>
+  </div>` : `
+  <h1 class="title-row">${esc(name)}
+    <button class="icon-btn" data-action="edit-toggle" aria-label="Rediger">${ICONS.edit}</button></h1>`);
+
+// Rad i redigeringsmodus: avkrysning, innhold og dra-håndtak
+const editRow = (key, inner) => `
+  <div class="list-item selectable ${selected.has(key) ? 'selected' : ''}" data-drag-item data-action="toggle-select" data-key="${key}">
+    <span class="check">${selected.has(key) ? '✓' : ''}</span>
+    <div class="grow">${inner}</div>
+    <span class="drag-handle" aria-label="Dra for å flytte">${ICONS.grip}</span>
+  </div>`;
+
+const editTools = (count, label) => `
+  <div class="muted small edit-hint">Trykk for å velge · dra i ⠿ for å endre rekkefølge</div>
+  <button class="soft-danger big" data-action="delete-selected" ${selected.size ? '' : 'disabled'}>
+    Slett valgte ${label}${selected.size ? ` (${selected.size})` : ''}</button>`;
+
 function renderProgram() {
   const p = getProgram(view.programId);
   if (!p) return go({ name: 'programs' });
-  const items = p.workouts.map(w => `
+  const info = w => `<strong>${esc(w.name)}</strong><div class="muted">${w.exerciseIds.length} øvelse(r)</div>`;
+  const items = p.workouts.map(w => (editMode ? editRow(w.id, info(w)) : `
     <div class="list-item clickable" data-action="open-workout" data-id="${w.id}">
-      <div><strong>${esc(w.name)}</strong><div class="muted">${w.exerciseIds.length} øvelse(r)</div></div>
+      <div>${info(w)}</div>
       <span class="muted">›</span>
-    </div>`).join('');
+    </div>`)).join('');
+  const list = items ? `<div class="drag-list" data-drag-list="program">${items}</div>` : '<p class="empty">Ingen økter i dette programmet ennå.</p>';
+
+  if (editMode) {
+    return `
+      ${titleHtml(p.name, 'program')}
+      ${list}
+      ${p.workouts.length ? `<div class="section">${editTools(p.workouts.length, 'økter')}</div>` : ''}
+      <div class="section"><button class="soft-danger big" data-action="delete-program">Slett hele programmet</button></div>`;
+  }
   return `
     ${modeSwitch()}
     <button class="link" data-action="all-programs">‹ Alle program</button>
-    <h1 class="title-row">${esc(p.name)}${renameBtn('program')}</h1>
-    ${items || '<p class="empty">Ingen økter i dette programmet ennå.</p>'}
+    ${titleHtml(p.name, 'program')}
+    ${list}
     <form class="row section" data-form="new-workout">
       <input name="name" placeholder="${p.type === 'cardio' ? 'Ny økt, f.eks. «Intervalldag»' : 'Ny økt, f.eks. «Push dag»'}" required>
       <button class="primary">Legg til</button>
-    </form>
-    <div class="section"><button class="soft-danger big" data-action="delete-program">Slett program</button></div>`;
+    </form>`;
 }
-
-const renameBtn = what => `
-  <button class="icon-btn" data-action="rename" data-what="${what}" aria-label="Endre navn">${ICONS.edit}</button>`;
 
 function renderWorkout() {
   const p = getProgram(view.programId);
   const w = getWorkout(view.programId, view.workoutId);
   if (!w) return go({ name: 'program', programId: view.programId });
-  const items = w.exerciseIds.map((id, i) => {
+  const info = id => {
     const e = getExercise(id);
+    return `${e ? exTitleHtml(e) : esc(exName(id))}<div class="muted small">${e ? esc(exLabel(e)) : ''}</div>`;
+  };
+  const items = w.exerciseIds.map((id, i) => (editMode ? editRow(String(i), info(id)) : `
+    <div class="list-item"><div class="grow">${info(id)}</div></div>`)).join('');
+  const list = items ? `<div class="drag-list" data-drag-list="workout">${items}</div>`
+    : '<p class="empty">Ingen øvelser ennå. Søk opp og legg til under.</p>';
+
+  if (editMode) {
     return `
-      <div class="list-item" data-drag-item>
-        <span class="drag-handle" aria-label="Dra for å flytte">${ICONS.grip}</span>
-        <div class="grow">${esc(exName(id))}
-          <div class="muted small">${e ? esc(exLabel(e)) : ''}</div></div>
-        <button class="remove" data-action="remove-ex" data-i="${i}">Fjern</button>
-      </div>`;
-  }).join('');
+      ${titleHtml(w.name, 'workout')}
+      ${list}
+      ${w.exerciseIds.length ? `<div class="section">${editTools(w.exerciseIds.length, 'øvelser')}</div>` : ''}
+      <div class="section"><button class="soft-danger big" data-action="delete-workout">Slett hele økta</button></div>`;
+  }
   return `
     <button class="link" data-action="open-program" data-id="${p.id}">‹ ${esc(p.name)}</button>
-    <h1 class="title-row">${esc(w.name)}${renameBtn('workout')}</h1>
-    ${items ? `<div class="drag-list" data-drag-list="workout">${items}</div>
-      ${w.exerciseIds.length > 1 ? '<div class="muted small" style="margin-top:-2px">Hold i ⠿ og dra for å endre rekkefølge.</div>' : ''}`
-      : '<p class="empty">Ingen øvelser ennå. Søk opp og legg til under.</p>'}
-    <div class="section">${exercisePicker('add-ex-to-workout', p.type)}</div>
-    <div class="section">
-      <button class="primary big" data-action="start-session" ${w.exerciseIds.length ? '' : 'disabled'}>▶ Start økt</button>
-    </div>
-    <div class="section"><button class="soft-danger big" data-action="delete-workout">Slett økt</button></div>`;
+    ${titleHtml(w.name, 'workout')}
+    <button class="primary big" data-action="start-session" style="margin-bottom:16px" ${w.exerciseIds.length ? '' : 'disabled'}>▶ Start økt</button>
+    ${list}
+    <div class="section">${exercisePicker('add-ex-to-workout', p.type)}</div>`;
 }
 
 function libraryItem(e, showGroup) {
   const meta = showGroup ? exLabel(e) : exMeta(e);
   return `
     <div class="list-item clickable" data-action="open-exercise" data-id="${e.id}">
-      <div>${esc(e.name)}${meta ? `<div class="muted small">${esc(meta)}</div>` : ''}</div>
+      <div>${exTitleHtml(e)}${meta ? `<div class="muted small">${esc(meta)}</div>` : ''}</div>
       <span class="muted">›</span>
     </div>`;
 }
@@ -1194,11 +1200,14 @@ function statsSince() {
 
 function strengthStatsHtml(histories) {
   const stats = {};
+  const eqStats = {}; // sett per kategori (utstyr)
   let total = 0, totalKg = 0;
   const sessions = histories.filter(h => h.type === 'styrke');
   sessions.forEach(h => h.exercises.forEach(he => {
     const ex = getExercise(he.exerciseId);
-    if (!ex || ex.type !== 'styrke' || !ex.category || !he.sets.length) return;
+    if (!ex || ex.type !== 'styrke' || !he.sets.length) return;
+    eqStats[ex.equipment || ''] = (eqStats[ex.equipment || ''] || 0) + he.sets.length;
+    if (!ex.category) return;
     const st = stats[ex.category] ??= { sets: 0, kg: 0, subs: {} };
     he.sets.forEach(s => { const kg = num(s.weight) * num(s.reps); st.sets++; st.kg += kg; totalKg += kg; });
     ex.subs.forEach(sub => { st.subs[sub] = (st.subs[sub] || 0) + he.sets.length; });
@@ -1235,7 +1244,30 @@ function strengthStatsHtml(histories) {
     <div class="stat-grid" style="grid-template-columns:1fr">${statTile(`${fmt(totalKg)} kg`, 'Totalt løftet')}</div>
     <h2 class="section">Muskelgrupper</h2>
     ${rows}
-    <p class="muted small">Antall sett fordelt på øvelsens muskelgruppe. Kg = vekt × reps.</p>`;
+    <p class="muted small">Antall sett fordelt på øvelsens muskelgruppe. Kg = vekt × reps.</p>
+    ${equipmentStatsHtml(eqStats)}`;
+}
+
+// Mest brukte kategorier (Maskin, Barbell, Smith …)
+function equipmentStatsHtml(eqStats) {
+  const total = Object.values(eqStats).reduce((a, b) => a + b, 0);
+  if (!total) return '';
+  const max = Math.max(...Object.values(eqStats));
+  const rows = [...EQUIPMENT, { id: '', name: 'Uten kategori' }]
+    .filter(c => eqStats[c.id])
+    .sort((a, b) => eqStats[b.id] - eqStats[a.id])
+    .map(c => `
+      <div class="card">
+        <div class="card-head" style="margin:0">
+          <strong>${c.name}</strong>
+          <span class="muted small">${eqStats[c.id]} sett · ${Math.round(eqStats[c.id] / total * 100)} %</span>
+        </div>
+        <div class="bar"><span style="width:${eqStats[c.id] / max * 100}%"></span></div>
+      </div>`).join('');
+  return `
+    <h2 class="section">Kategorier</h2>
+    ${rows}
+    <p class="muted small">Antall sett fordelt på øvelsens kategori.</p>`;
 }
 
 function cardioStatsHtml(histories) {
@@ -1565,6 +1597,13 @@ function render() {
 const lastViewByTab = {};
 
 function go(newView) {
+  // Ny side: avslutt redigeringsmodus (og lagre et gyldig navn)
+  if (editMode) {
+    const obj = view.name === 'program' ? getProgram(view.programId) : view.name === 'workout' ? getWorkout(view.programId, view.workoutId) : null;
+    if (obj && !obj.name.trim()) { obj.name = view.name === 'program' ? 'Uten navn' : 'Ny økt'; save(); }
+    editMode = false;
+    selected.clear();
+  }
   view = newView;
   const tab = TAB_OF[view.name] ?? view.name;
   if (['programs', 'library', 'history', 'profile'].includes(tab)) lastViewByTab[tab] = view;
@@ -1621,18 +1660,41 @@ const actions = {
     save(); render();
   },
 
-  'rename': async d => {
-    const isProgram = d.what === 'program';
-    const obj = isProgram ? getProgram(view.programId) : getWorkout(view.programId, view.workoutId);
-    const name = await askText(isProgram ? 'Endre navn på program' : 'Endre navn på økt', obj.name);
-    if (!name || name === obj.name) return;
-    obj.name = name;
-    // Pågående økt fra dette programmet / denne økta får også nytt navn
-    if (db.active && (isProgram ? db.active.programId === obj.id : db.active.workoutId === obj.id)) {
-      db.active[isProgram ? 'programName' : 'workoutName'] = name;
+  // Redigeringsmodus av/på (blyanten / «Ferdig»)
+  'edit-toggle': () => {
+    if (editMode) {
+      // Tomt navn er ikke lov – sett tilbake et standardnavn
+      const obj = view.name === 'program' ? getProgram(view.programId) : getWorkout(view.programId, view.workoutId);
+      if (obj) {
+        obj.name = obj.name.trim() || (view.name === 'program' ? 'Uten navn' : 'Ny økt');
+        renameActive(obj, view.name === 'program');
+        save();
+      }
     }
+    editMode = !editMode;
+    selected.clear();
+    render();
+  },
+  'toggle-select': d => {
+    selected.has(d.key) ? selected.delete(d.key) : selected.add(d.key);
+    render();
+  },
+  'delete-selected': async () => {
+    const n = selected.size;
+    if (!n) return;
+    if (view.name === 'program') {
+      const p = getProgram(view.programId);
+      if (!await ask(`Slette ${n} ${n === 1 ? 'økt' : 'økter'}?`, 'Øktene fjernes fra programmet. Loggen beholdes.', { ok: 'Slett' })) return;
+      p.workouts = p.workouts.filter(w => !selected.has(w.id));
+    } else {
+      const w = getWorkout(view.programId, view.workoutId);
+      if (!await ask(`Fjerne ${n} ${n === 1 ? 'øvelse' : 'øvelser'}?`, `Øvelsene fjernes fra «${w.name}». De ligger fortsatt i øvelsesbiblioteket.`, { ok: 'Fjern' })) return;
+      w.exerciseIds = w.exerciseIds.filter((_, i) => !selected.has(String(i)));
+    }
+    selected.clear();
     save(); render();
   },
+  'close-picker': () => closePickers(),
   'share-app': () => shareApp(),
   'install-help': () => showInstallHelp(),
   'install-dismiss': () => {
@@ -1651,18 +1713,6 @@ const actions = {
     if (!await ask(`Slette «${w.name}»?`, 'Økta fjernes fra programmet. Loggen beholdes.', { ok: 'Slett økt' })) return;
     p.workouts = p.workouts.filter(x => x !== w);
     save(); go({ name: 'program', programId: p.id });
-  },
-  'remove-ex': async d => {
-    const w = getWorkout(view.programId, view.workoutId);
-    if (!await ask(`Fjerne «${exName(w.exerciseIds[+d.i])}»?`, `Øvelsen fjernes fra «${w.name}». Den ligger fortsatt i øvelsesbiblioteket.`, { ok: 'Fjern øvelse' })) return;
-    w.exerciseIds.splice(+d.i, 1);
-    save(); render();
-  },
-  'move-ex': d => {
-    const ids = getWorkout(view.programId, view.workoutId).exerciseIds;
-    const i = +d.i, j = i + +d.dir;
-    [ids[i], ids[j]] = [ids[j], ids[i]];
-    save(); render();
   },
   'delete-exercise': async () => {
     const e = getExercise(view.exerciseId);
@@ -1825,10 +1875,20 @@ const actions = {
     // Spør om endringer i øvelsene skal lagres permanent i økta
     const w = getWorkout(a.programId, a.workoutId);
     const ids = a.exercises.map(e => e.exerciseId).filter(id => getExercise(id));
-    if (w && JSON.stringify(ids) !== JSON.stringify(w.exerciseIds) &&
-        await ask(`Oppdatere «${w.name}»?`, 'Du har lagt til eller fjernet øvelser. Skal økta ha disse øvelsene neste gang også?',
-          { ok: 'Ja, oppdater økta', cancel: 'Nei, bare denne gangen', danger: false })) {
-      w.exerciseIds = ids;
+    if (w && JSON.stringify(ids) !== JSON.stringify(w.exerciseIds)) {
+      const added = ids.filter(id => !w.exerciseIds.includes(id)).map(exName);
+      const removed = w.exerciseIds.filter(id => !ids.includes(id)).map(exName);
+      const changes = [
+        added.length ? `Lagt til: ${added.join(', ')}` : '',
+        removed.length ? `Fjernet: ${removed.join(', ')}` : '',
+        !added.length && !removed.length ? 'Rekkefølgen er endret' : '',
+      ].filter(Boolean).join('\n');
+      // Dobbeltsjekk: først spørsmålet, så en bekreftelse før økta endres for godt
+      if (await ask(`Oppdatere «${w.name}»?`, `${changes}\n\nSkal økta ha disse øvelsene neste gang også?`,
+            { ok: 'Ja, oppdater økta', cancel: 'Nei, bare denne gangen', danger: false }) &&
+          await ask('Er du sikker?', `«${w.name}» endres permanent.`, { ok: 'Oppdater økta', cancel: 'Avbryt', danger: false })) {
+        w.exerciseIds = ids;
+      }
     }
     db.history.push({
       id: uid(),
@@ -1973,6 +2033,7 @@ document.addEventListener('visibilitychange', () => {
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-action]');
   if (!el || el.disabled) return;
+  if (e.target.closest('.drag-handle')) return; // håndtaket er bare for å dra
   const action = el.closest('#nav') ? 'tab' : el.dataset.action;
   actions[action]?.(el.dataset);
 });
@@ -2051,11 +2112,13 @@ document.addEventListener('focusout', e => {
 
 // ---------- Dra for å endre rekkefølge ----------
 // Lister merket data-drag-list, med rader merket data-drag-item og et .drag-handle i hver rad
+const moveItem = (arr, from, to) => arr.splice(to, 0, arr.splice(from, 1)[0]);
 const DRAG_LISTS = {
   workout: (from, to) => {
-    const ids = getWorkout(view.programId, view.workoutId).exerciseIds;
-    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    moveItem(getWorkout(view.programId, view.workoutId).exerciseIds, from, to);
+    selected.clear(); // valg er knyttet til plassering
   },
+  program: (from, to) => moveItem(getProgram(view.programId).workouts, from, to),
 };
 let drag = null;
 const dragItems = list => [...list.querySelectorAll(':scope > [data-drag-item]')];
@@ -2120,7 +2183,23 @@ document.addEventListener('focusin', e => {
   if (!e.target.matches('[data-picker-input]')) return;
   const picker = e.target.closest('.picker');
   picker.querySelector('.picker-results').innerHTML = pickerResultsHtml(picker.dataset.target, picker.dataset.type, e.target.value);
+  picker.classList.add('open');
 });
+
+// Lukk søket etter øvelse (✕-knappen eller trykk utenfor)
+function closePickers(except = null) {
+  document.querySelectorAll('.picker.open').forEach(p => {
+    if (p === except) return;
+    p.classList.remove('open');
+    p.querySelector('.picker-results').innerHTML = '';
+    const input = p.querySelector('[data-picker-input]');
+    input.value = '';
+    input.blur();
+  });
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.picker')) closePickers();
+}, true);
 
 document.addEventListener('input', e => {
   const el = e.target;
@@ -2162,6 +2241,15 @@ document.addEventListener('input', e => {
     editDraft[el.dataset.meta] = el.value;
     return;
   }
+  // Nytt navn på program / økt (redigeringsmodus)
+  if (el.dataset.renameInput) {
+    const isProgram = el.dataset.renameInput === 'program';
+    const obj = isProgram ? getProgram(view.programId) : getWorkout(view.programId, view.workoutId);
+    if (!obj) return;
+    obj.name = el.value;
+    if (el.value.trim()) { renameActive(obj, isProgram); save(); }
+    return;
+  }
   // Oppsett av cardioøkt
   if (el.dataset.cw) {
     const w = currentCw();
@@ -2199,6 +2287,15 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 navigator.storage?.persist?.().catch(() => {});
+
+// Riktig tekst i menylinja selv om en eldre index.html ligger på telefonen
+(() => {
+  const b = document.querySelector('#nav [data-view="history"]');
+  if (!b) return;
+  const lbl = b.querySelector('.lbl');
+  if (lbl) lbl.textContent = 'Logg';
+  else b.textContent = 'Logg';
+})();
 
 applyTheme();
 view = db.active ? { name: 'session' } : homeProgramView();

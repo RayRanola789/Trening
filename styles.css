@@ -103,6 +103,16 @@ body.kb-open #nav { display: none; }
 }
 .search input { width: 100%; padding-left: 42px; }
 .search:focus-within svg { color: var(--accent); }
+.picker-close {
+  display: none; position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  width: 32px; height: 32px; padding: 0; border-radius: 50%;
+  background: var(--line); color: var(--text); font-size: .85rem;
+}
+.picker.open .picker-close { display: grid; place-items: center; }
+.picker.open .search input { padding-right: 44px; }
+/* Skjul Safaris egen tøm-knapp i søkefelt, vi har vår egen */
+.picker input[type=search]::-webkit-search-cancel-button { -webkit-appearance: none; }
+.eq { color: var(--muted); font-weight: 400; }
 
 /* Små ikoner (styrke, cardio, statistikk, innstillinger) */
 .ic svg, .menu-ico svg {
@@ -304,7 +314,6 @@ button.soft-danger:active { background: color-mix(in srgb, var(--danger) 22%, tr
   display: flex; flex-direction: column; gap: 4px;
 }
 .sheet-msg strong { font-size: 1rem; }
-.sheet-input { margin-top: 10px; width: 100%; text-align: left; }
 
 /* Legg til på Hjem-skjerm */
 .install-banner {
@@ -328,6 +337,20 @@ button.soft-danger:active { background: color-mix(in srgb, var(--danger) 22%, tr
 
 /* Overskrift med blyant for å endre navn */
 .title-row { display: flex; align-items: center; gap: 8px; }
+.title-row.edit { margin: 4px 0 16px; }
+.title-input { flex: 1; min-width: 0; font-size: 1.25rem; font-weight: 700; padding: 8px 12px; }
+.title-row.edit .primary { flex: none; }
+
+/* Valg av rader i redigeringsmodus */
+.list-item.selectable { cursor: pointer; gap: 12px; justify-content: flex-start; }
+.check {
+  flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+  border: 2px solid var(--line); color: var(--on-accent); font-size: .8rem; font-weight: 800;
+}
+.list-item.selected { background: color-mix(in srgb, var(--accent) 14%, var(--card)); }
+.list-item.selected .check { background: var(--accent); border-color: var(--accent); }
+.edit-hint { text-align: center; margin: -2px 0 10px; }
+.list-item.selectable .drag-handle { margin: -6px -6px -6px 4px; }
 .icon-btn {
   flex: none; display: grid; place-items: center; width: 36px; height: 36px; padding: 0;
   border-radius: 10px; background: var(--card); color: var(--muted);
@@ -350,7 +373,7 @@ button.soft-danger:active { background: color-mix(in srgb, var(--danger) 22%, tr
 }
 .drag-list.is-dragging [data-drag-item]:not(.dragging) { transition: transform .15s; }
 body.no-select { -webkit-user-select: none; user-select: none; }
-.sheet-msg span { color: var(--muted); font-size: .85rem; line-height: 1.35; }
+.sheet-msg span { color: var(--muted); font-size: .85rem; line-height: 1.35; white-space: pre-line; }
 .sheet-btn {
   display: block; width: 100%; border-radius: 0; background: none;
   padding: 17px; font-size: 1.1rem; color: var(--accent); font-weight: 600;

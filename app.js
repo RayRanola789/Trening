@@ -48,6 +48,8 @@ const ICONS = {
   styrke: '<svg viewBox="0 0 24 24"><path d="M7.4 11.2C6 5.5 8.4 3.3 12 3.3s6 2.2 4.6 7.9"/><path d="M8.6 9.8c.4-2.3 1.6-3.2 3.4-3.2s3 .9 3.4 3.2"/><path d="M8.8 20.8a6.4 6.4 0 1 1 6.4 0z"/></svg>',
   // Hjerte med puls
   cardio: '<svg viewBox="0 0 24 24"><path d="M20.4 12.6c1.8-2.4 1.6-6-.8-7.6-2.4-1.6-5.4-.7-7.6 2-2.2-2.7-5.2-3.6-7.6-2-2.4 1.6-2.6 5.2-.8 7.6"/><path d="M3 12.5h4l1.8-3 3 6 2-4.2 1.2 1.2H21"/><path d="M6.5 15.8L12 20.5l5.5-4.7"/></svg>',
+  // Badevekt
+  vekt: '<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M8 9.5a5 5 0 0 1 8 0"/><path d="M12 9.8l1.3-2"/></svg>',
   // Søylediagram
   stats: '<svg viewBox="0 0 24 24"><path d="M4 20.5h16"/><path d="M6.5 17V12M11 17V6.5M15.5 17V9.5M20 17v-4" stroke-width="2.6"/></svg>',
   // Forstørrelsesglass
@@ -56,6 +58,10 @@ const ICONS = {
   edit: '<svg viewBox="0 0 24 24"><path d="M4 20l1-4.5L15.5 5a2.1 2.1 0 0 1 3 3L8 18.5z"/><path d="M13.5 7l3 3"/></svg>',
   // Dra-håndtak
   grip: '<svg viewBox="0 0 24 24"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" stroke-width="3.2"/></svg>',
+  // Del (iOS-stil: firkant med pil opp)
+  share: '<svg viewBox="0 0 24 24"><path d="M12 3.5v11M8 7.2l4-3.7 4 3.7"/><path d="M8.5 10.5H7a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-1.5"/></svg>',
+  // Legg til (pluss i firkant)
+  addHome: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8.5v7M8.5 12h7"/></svg>',
   // Malerpalett
   palette: '<svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0 0 17c1.3 0 2-.8 2-1.8 0-1.3-1.2-1.7-1.2-2.9 0-1 .8-1.8 1.8-1.8h2.2a3.7 3.7 0 0 0 3.7-3.7C20.5 6.6 16.7 3.5 12 3.5z"/><circle cx="7.8" cy="11" r="1.1"/><circle cx="10.2" cy="7.3" r="1.1"/><circle cx="14.6" cy="7.6" r="1.1"/></svg>',
   // Glidebrytere
@@ -463,6 +469,75 @@ function askText(title, value = '', { ok = 'Lagre', placeholder = '' } = {}) {
     input.focus();
     input.select();
   });
+}
+
+// ---------- Hjem-skjerm og deling ----------
+
+const isStandalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const appUrl = () => location.origin + location.pathname.replace(/index\.html$/, '');
+const INSTALL_KEY = 'treningsapp-install-dismissed';
+
+function installDismissed() {
+  try { return localStorage.getItem(INSTALL_KEY) === '1'; } catch (e) { return false; }
+}
+// Banner øverst når appen er åpnet i Safari på iPhone (ikke fra Hjem-skjermen)
+const showInstallBanner = () => isIOS() && !isStandalone() && !installDismissed();
+
+const installBannerHtml = () => `
+  <div class="install-banner">
+    <span class="menu-ico">${ICONS.addHome}</span>
+    <div class="grow">
+      <strong>Legg appen på Hjem-skjermen</strong>
+      <div class="muted small">Da åpnes den i fullskjerm, som en vanlig app.</div>
+    </div>
+    <div class="install-actions">
+      <button class="primary" data-action="install-help">Slik gjør du</button>
+      <button class="link" data-action="install-dismiss">Ikke nå</button>
+    </div>
+  </div>`;
+
+function showInstallHelp() {
+  const el = document.createElement('div');
+  el.className = 'sheet-backdrop';
+  el.innerHTML = `
+    <div class="sheet" role="dialog" aria-modal="true">
+      <div class="sheet-group install-help">
+        <strong class="install-title">Legg til på Hjem-skjerm</strong>
+        <ol class="install-steps">
+          <li><span class="step-ico">${ICONS.share}</span>
+            <span>Trykk på <b>Del</b>-knappen i Safari. På nyere iPhone ligger den under <b>•••</b> nede til høyre.</span></li>
+          <li><span class="step-ico">${ICONS.addHome}</span>
+            <span>Bla ned og velg <b>Legg til på Hjem-skjerm</b>.</span></li>
+          <li><span class="step-ico step-num">✓</span>
+            <span>Trykk <b>Legg til</b> øverst til høyre. Appen ligger nå på Hjem-skjermen som «Trening».</span></li>
+        </ol>
+        <div class="muted small install-note">Tips: Åpne appen fra Hjem-skjermen etterpå. Det du har lagt inn her i Safari følger ikke med dit.</div>
+      </div>
+      <button class="sheet-btn cancel" data-r="0">OK</button>
+    </div>`;
+  const close = () => { el.classList.remove('open'); setTimeout(() => el.remove(), 250); };
+  el.addEventListener('click', e => {
+    e.stopPropagation();
+    if (e.target.closest('[data-r]') || e.target === el) close();
+  });
+  document.body.appendChild(el);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('open')));
+}
+
+async function shareApp() {
+  const url = appUrl();
+  if (navigator.share) {
+    try { await navigator.share({ title: 'Treningslogg', text: 'Enkel app for å logge treningsøkter', url }); }
+    catch (e) { /* avbrutt av brukeren */ }
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    notice('Lenken er kopiert', url);
+  } catch (e) {
+    notice('Del appen', url);
+  }
 }
 
 const notice = (title, message) => ask(title, message, { ok: 'OK', cancel: '', danger: false });
@@ -1213,6 +1288,7 @@ function statsPeriodsHtml() {
 function statsBodyHtml() {
   const since = statsSince();
   const histories = db.history.filter(h => h.startedAt >= since);
+  if (statsState.type === 'vekt') return bodyweightHtml(since);
   return statsState.type === 'cardio' ? cardioStatsHtml(histories) : strengthStatsHtml(histories);
 }
 
@@ -1221,7 +1297,7 @@ function renderStats() {
   return `
     <button class="link" data-action="nav" data-view="profile">‹ Profil</button>
     <h1>Statistikk</h1>
-    <div class="seg mode-seg">${MODES.map(m =>
+    <div class="seg mode-seg stats-seg">${[...MODES, { id: 'vekt', name: 'Kroppsvekt' }].map(m =>
       `<button class="${statsState.type === m.id ? 'active' : ''}" data-action="stats-type" data-t="${m.id}">${icon(m.id)}${m.name}</button>`).join('')}
     </div>
     <div class="seg" id="stats-periods">${statsPeriodsHtml()}</div>
@@ -1317,28 +1393,22 @@ function weightChart(list) {
     </div>`;
 }
 
-function renderProfile() {
-  const list = [...db.bodyweight].sort((a, b) => a.date - b.date);
-  const latest = list[list.length - 1];
-  const prev = list[list.length - 2];
+// Kroppsvekt (vises under Statistikk). since = vis bare registreringer etter dette tidspunktet
+function bodyweightHtml(since = 0) {
+  const all = [...db.bodyweight].sort((a, b) => a.date - b.date);
+  const list = all.filter(e => e.date >= since);
+  const latest = all[all.length - 1];
+  const prev = all[all.length - 2];
   const change = (from, label) => {
-    if (!from) return '';
+    if (!from || from === latest) return '';
     const d = num(latest.kg) - num(from.kg);
     return `<div class="muted small">${d > 0 ? '+' : ''}${fmt(d)} kg ${label}</div>`;
   };
   return `
-    <h1>Profil</h1>
-    <div class="list-item clickable" data-action="nav" data-view="stats">
-      <span class="menu-row"><span class="menu-ico">${ICONS.stats}</span><strong>Statistikk</strong></span><span class="muted">›</span>
-    </div>
-    <div class="list-item clickable" data-action="nav" data-view="settings">
-      <span class="menu-row"><span class="menu-ico">${ICONS.settings}</span><strong>Innstillinger</strong></span><span class="muted">›</span>
-    </div>
-    <h2 class="section">Kroppsvekt</h2>
     ${latest ? `
       <div class="stat-grid">
         <div class="stat"><div class="value">${fmt(num(latest.kg))} kg</div><div class="label">Nå (${formatDay(latest.date)})</div></div>
-        <div class="stat">${change(prev, 'siden forrige') || '<div class="muted small">–</div>'}${list.length > 2 ? change(list[0], 'totalt') : ''}</div>
+        <div class="stat">${change(prev, 'siden forrige') || '<div class="muted small">–</div>'}${change(list[0], since ? 'i perioden' : 'totalt')}</div>
       </div>` : ''}
     <form class="card stack" data-form="new-bodyweight">
       <strong>Legg inn vekt</strong>
@@ -1349,13 +1419,31 @@ function renderProfile() {
       <button class="primary">Lagre</button>
     </form>
     ${list.length >= 2 ? weightChart(list) : ''}
-    <h2 class="section">Logg</h2>
+    <h2 class="section">Registreringer</h2>
     ${[...list].reverse().map(e => `
       <div class="list-item">
         <span>${formatDay(e.date)}</span>
         <span class="row"><strong>${fmt(num(e.kg))} kg</strong>
           <button class="danger" data-action="delete-bw" data-id="${e.id}" aria-label="Slett">✕</button></span>
-      </div>`).join('') || '<p class="empty">Ingen registreringer ennå.</p>'}`;
+      </div>`).join('') || `<p class="empty">Ingen registreringer${since ? ' i denne perioden' : ' ennå'}.</p>`}`;
+}
+
+function renderProfile() {
+  return `
+    <h1>Profil</h1>
+    <div class="list-item clickable" data-action="nav" data-view="stats">
+      <span class="menu-row"><span class="menu-ico">${ICONS.stats}</span><strong>Statistikk</strong></span><span class="muted">›</span>
+    </div>
+    <div class="list-item clickable" data-action="nav" data-view="settings">
+      <span class="menu-row"><span class="menu-ico">${ICONS.settings}</span><strong>Innstillinger</strong></span><span class="muted">›</span>
+    </div>
+    <div class="list-item clickable" data-action="share-app">
+      <span class="menu-row"><span class="menu-ico">${ICONS.share}</span><strong>Del appen</strong></span><span class="muted">›</span>
+    </div>
+    ${isStandalone() ? '' : `
+    <div class="list-item clickable" data-action="install-help">
+      <span class="menu-row"><span class="menu-ico">${ICONS.addHome}</span><strong>Legg til på Hjem-skjerm</strong></span><span class="muted">›</span>
+    </div>`}`;
 }
 
 const dots = colors => `<span class="dots"><span style="background:${colors.bg}"></span><span style="background:${colors.accent}"></span></span>`;
@@ -1465,7 +1553,7 @@ const TAB_OF = { program: 'programs', workout: 'programs', cardioWorkout: 'progr
 function render() {
   const html = VIEWS[view.name]();
   if (html === undefined) return; // go() har allerede rendret
-  document.getElementById('app').innerHTML = html;
+  document.getElementById('app').innerHTML = (showInstallBanner() && view.name !== 'session' ? installBannerHtml() : '') + html;
   if (!typesKeyboard(document.activeElement)) document.body.classList.remove('kb-open');
   renderHeader();
   const tab = TAB_OF[view.name] ?? view.name;
@@ -1544,6 +1632,12 @@ const actions = {
       db.active[isProgram ? 'programName' : 'workoutName'] = name;
     }
     save(); render();
+  },
+  'share-app': () => shareApp(),
+  'install-help': () => showInstallHelp(),
+  'install-dismiss': () => {
+    try { localStorage.setItem(INSTALL_KEY, '1'); } catch (e) { /* ignorer */ }
+    render();
   },
   'delete-program': async () => {
     const p = getProgram(view.programId);

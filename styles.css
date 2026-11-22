@@ -90,6 +90,10 @@ body.kb-open #nav { display: none; }
   stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; display: block;
 }
 
+/* Tre valg på statistikk: litt mindre tekst så det får plass */
+.stats-seg button { font-size: .85rem; padding-left: 2px; padding-right: 2px; }
+.stats-seg .ic { margin-right: 5px; }
+
 /* Søkefelt med ikon */
 .search { position: relative; display: block; }
 .search svg {
@@ -301,6 +305,26 @@ button.soft-danger:active { background: color-mix(in srgb, var(--danger) 22%, tr
 }
 .sheet-msg strong { font-size: 1rem; }
 .sheet-input { margin-top: 10px; width: 100%; text-align: left; }
+
+/* Legg til på Hjem-skjerm */
+.install-banner {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  background: var(--card); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-radius: 14px; padding: 14px; margin-bottom: 16px;
+}
+.install-banner .grow { flex: 1 1 180px; }
+.install-actions { display: flex; gap: 8px; align-items: center; width: 100%; }
+.install-actions .primary { flex: 1; }
+.install-help { padding: 18px 18px 14px; }
+.install-title { display: block; text-align: center; font-size: 1.05rem; margin-bottom: 12px; }
+.install-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.install-steps li { display: flex; align-items: center; gap: 12px; line-height: 1.35; font-size: .95rem; }
+.step-ico {
+  flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); font-weight: 700;
+}
+.step-ico svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.install-note { margin-top: 14px; text-align: center; }
 
 /* Overskrift med blyant for å endre navn */
 .title-row { display: flex; align-items: center; gap: 8px; }

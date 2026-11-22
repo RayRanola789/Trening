@@ -139,6 +139,29 @@ db.settings.custom ??= [{ name: 'Mitt tema 1', colors: null }, { name: 'Mitt tem
 db.settings.activeSlot ??= null;
 db.settings.mode ??= 'styrke';
 
+// Standardøvelser legges inn én gang. De er vanlige øvelser og kan slettes – de kommer ikke tilbake.
+const DEFAULT_EXERCISES = [
+  ['Benkpress',      'bryst',   [],          'barbell'],
+  ['Markløft',       'rygg',    [],          'barbell'],
+  ['Squat',          'bein',    [],          'barbell'],
+  ['Hammer curl',    'armer',   ['Bicep'],   'dumbbell'],
+  ['Pushdown',       'armer',   ['Tricep'],  'cable'],
+  ['Lateral raises', 'skuldre', ['Lateral'], 'dumbbell'],
+  ['Military press', 'skuldre', ['Front'],   'barbell'],
+  ['Incline press',  'bryst',   ['Upper'],   'dumbbell'],
+  ['Pull up',        'rygg',    [],          'annet'],
+  ['Leg press',      'bein',    [],          'maskin'],
+  ['Chest flyes',    'bryst',   [],          'cable'],
+];
+if (!db.defaultsAdded) {
+  const have = new Set(db.exercises.map(e => e.name.toLowerCase()));
+  DEFAULT_EXERCISES.forEach(([name, category, subs, equipment]) => {
+    if (have.has(name.toLowerCase())) return; // finnes allerede (f.eks. laget selv)
+    db.exercises.push({ id: uid(), type: 'styrke', name, category, subs, equipment, timed: false });
+  });
+  db.defaultsAdded = true;
+}
+
 // Cardio er egne økter (ikke program/øvelser):
 // { id, name, sport, kind:'tur'|'intervall', plan:'fast'|'dynamisk', work, rest, rounds, sets:[{ work, rest }] }
 if (!db.cardioWorkouts) {
@@ -778,7 +801,7 @@ function tickIntervalTimer() {
   }
 }
 
-function strengthRows(ex, i, scope) {
+function strengthRows(ex, i, scope, inSuperset = false) {
   const timed = isTimedEx(ex);
   const withClock = timed && scope === 'active';
   const sw = scope === 'active' ? db.active.stopwatch : null;
@@ -800,7 +823,7 @@ function strengthRows(ex, i, scope) {
   return `
     <div class="set-grid head ${withClock ? 'timed' : ''}"><span class="num">Sett</span><span>Vekt (kg)</span><span>${timed ? 'Tid (sek)' : 'Reps'}</span>${withClock ? '<span></span>' : ''}<span></span></div>
     ${rows}
-    <button data-action="add-set" data-scope="${scope}" data-i="${i}" style="width:100%">+ Legg til sett</button>`;
+    ${inSuperset ? '' : `<button data-action="add-set" data-scope="${scope}" data-i="${i}" style="width:100%">+ Legg til sett</button>`}`;
 }
 
 function intervalRows(ex, i, scope) {
@@ -834,14 +857,16 @@ function turFields(ex, i, scope) {
 }
 
 function setCards(exercises, scope) {
-  return exercises.map((ex, i) => {
+  const runs = ssRuns(exercises.map(e => e.ss ?? null));
+  const inSs = new Set(runs.filter(r => r.gid).flatMap(r => r.idx));
+  const cards = exercises.map((ex, i) => {
     const kind = cardioKindOf(ex);
     const cardioSession = !ex.exerciseId && kind; // cardioøkt (ikke øvelse fra biblioteket)
     const last = scope !== 'active' ? null
       : cardioSession ? lastCardio(db.active.workoutId) : lastPerformance(ex.exerciseId);
     const body = kind === 'tur' ? turFields(ex, i, scope)
       : kind === 'intervall' ? intervalRows(ex, i, scope)
-      : strengthRows(ex, i, scope);
+      : strengthRows(ex, i, scope, inSs.has(i));
     return `
       <section class="card">
         <div class="card-head">
@@ -852,7 +877,14 @@ function setCards(exercises, scope) {
         ${last ? `<div class="muted small" style="margin-bottom:8px">Forrige gang: ${esc(last)}</div>` : ''}
         ${body}
       </section>`;
-  }).join('');
+  });
+  // Supersett samles i en egen boks
+  // Supersett samles i en egen boks, med én knapp som legger til ett sett på hver øvelse
+  return runs.map(r => (r.gid ? ssBox(r.idx.length, `
+      ${r.idx.map(i => cards[i]).join('')}
+      <button data-action="ss-add-round" data-scope="${scope}" data-idx="${r.idx.join(',')}" style="width:100%">
+        + Legg til sett på alle (${r.idx.length})</button>`)
+    : cards[r.idx[0]])).join('');
 }
 
 // ---------- Visninger ----------
@@ -1027,18 +1059,87 @@ function renderProgram() {
     </form>`;
 }
 
+// ---------- Supersett ----------
+// En økt har w.exerciseIds og en parallell liste w.ss med supersett-id (eller null) per øvelse.
+// Øvelser som ligger etter hverandre med samme id er ett supersett.
+function ssOf(w) {
+  w.ss ??= [];
+  while (w.ss.length < w.exerciseIds.length) w.ss.push(null);
+  w.ss.length = w.exerciseIds.length;
+  return w.ss;
+}
+
+// Deler en liste i grupper: [{ gid, idx: [indekser] }]. Bare 2+ på rad med samme id er et supersett.
+function ssRuns(gids) {
+  const runs = [];
+  gids.forEach((g, i) => {
+    const last = runs[runs.length - 1];
+    if (g && last && last.gid === g) last.idx.push(i);
+    else runs.push({ gid: g, idx: [i] });
+  });
+  return runs.flatMap(r => (r.gid && r.idx.length > 1 ? [r] : r.idx.map(i => ({ gid: null, idx: [i] }))));
+}
+
+const ssBox = (count, inner) => `
+  <div class="superset">
+    <div class="superset-head"><span class="ss-tag">Supersett</span>
+      <span class="muted small">${count} øvelser på rundgang – ett sett av hver, så om igjen</span></div>
+    ${inner}
+  </div>`;
+
+// Panel for å sette sammen et nytt supersett
+let ssDraft = null; // liste med øvelse-id-er, eller null når panelet er lukket
+
+function supersetBuilderHtml(type) {
+  if (!ssDraft) {
+    return `<button class="ss-add-btn" data-action="ss-open">＋ Legg til supersett</button>`;
+  }
+  const chosen = ssDraft.map((id, i) => `
+    <div class="list-item">
+      <span class="ss-num">${i + 1}</span>
+      <div class="grow">${exTitleHtml(getExercise(id) ?? { name: exName(id) })}</div>
+      <button class="danger" data-action="ss-remove" data-i="${i}" aria-label="Fjern">✕</button>
+    </div>`).join('');
+  return `
+    <div class="card superset-builder">
+      <div class="card-head"><strong>Nytt supersett</strong><span class="muted small">Velg 2 eller flere</span></div>
+      ${chosen || '<p class="muted small" style="margin:0 0 10px">Søk opp øvelsene i den rekkefølgen du vil ta dem.</p>'}
+      ${exercisePicker('ss-add', type)}
+      <div class="row section">
+        <button class="grow" data-action="ss-cancel">Avbryt</button>
+        <button class="grow primary" data-action="ss-save" ${ssDraft.length >= 2 ? '' : 'disabled'}>Legg til (${ssDraft.length})</button>
+      </div>
+    </div>`;
+}
+
 function renderWorkout() {
   const p = getProgram(view.programId);
   const w = getWorkout(view.programId, view.workoutId);
   if (!w) return go({ name: 'program', programId: view.programId });
+  const ss = ssOf(w);
   const info = id => {
     const e = getExercise(id);
     return `${e ? exTitleHtml(e) : esc(exName(id))}<div class="muted small">${e ? esc(exLabel(e)) : ''}</div>`;
   };
-  const items = w.exerciseIds.map((id, i) => (editMode ? editRow(String(i), info(id)) : `
-    <div class="list-item"><div class="grow">${info(id)}</div></div>`)).join('');
-  const list = items ? `<div class="drag-list" data-drag-list="workout">${items}</div>`
-    : '<p class="empty">Ingen øvelser ennå. Søk opp og legg til under.</p>';
+  // Vanlig rad som kan sveipes til venstre for å fjerne
+  const swipeRow = i => `
+    <div class="swipe-row">
+      <button class="swipe-del" data-action="swipe-remove" data-i="${i}">Fjern</button>
+      <div class="list-item swipe-item" data-swipe="${i}"><div class="grow">${info(w.exerciseIds[i])}</div></div>
+    </div>`;
+
+  let list;
+  if (editMode) {
+    const runs = ssRuns(ss);
+    const inSs = new Set(runs.filter(r => r.gid).flatMap(r => r.idx));
+    const items = w.exerciseIds.map((id, i) =>
+      editRow(String(i), `${inSs.has(i) ? '<span class="ss-tag small-tag">SS</span> ' : ''}${info(id)}`)).join('');
+    list = items ? `<div class="drag-list" data-drag-list="workout">${items}</div>` : '';
+  } else {
+    list = ssRuns(ss).map(r => (r.gid ? ssBox(r.idx.length, r.idx.map(swipeRow).join('')) : swipeRow(r.idx[0]))).join('');
+    if (list) list += '<div class="muted small swipe-hint">Sveip en øvelse til venstre for å fjerne den.</div>';
+  }
+  list ||= '<p class="empty">Ingen øvelser ennå. Søk opp og legg til under.</p>';
 
   if (editMode) {
     return `
@@ -1052,7 +1153,8 @@ function renderWorkout() {
     ${titleHtml(w.name, 'workout')}
     <button class="primary big" data-action="start-session" style="margin-bottom:16px" ${w.exerciseIds.length ? '' : 'disabled'}>▶ Start økt</button>
     ${list}
-    <div class="section">${exercisePicker('add-ex-to-workout', p.type)}</div>`;
+    <div class="section">${ssDraft ? '' : exercisePicker('add-ex-to-workout', p.type)}</div>
+    <div class="section">${supersetBuilderHtml(p.type)}</div>`;
 }
 
 function libraryItem(e, showGroup) {
@@ -1329,7 +1431,7 @@ function renderStats() {
   return `
     <button class="link" data-action="nav" data-view="profile">‹ Profil</button>
     <h1>Statistikk</h1>
-    <div class="seg mode-seg stats-seg">${[...MODES, { id: 'vekt', name: 'Kroppsvekt' }].map(m =>
+    <div class="seg mode-seg stats-seg">${[...MODES, { id: 'vekt', name: 'Vekt' }].map(m =>
       `<button class="${statsState.type === m.id ? 'active' : ''}" data-action="stats-type" data-t="${m.id}">${icon(m.id)}${m.name}</button>`).join('')}
     </div>
     <div class="seg" id="stats-periods">${statsPeriodsHtml()}</div>
@@ -1598,6 +1700,7 @@ const lastViewByTab = {};
 
 function go(newView) {
   // Ny side: avslutt redigeringsmodus (og lagre et gyldig navn)
+  ssDraft = null; // nytt supersett lukkes når man bytter side
   if (editMode) {
     const obj = view.name === 'program' ? getProgram(view.programId) : view.name === 'workout' ? getWorkout(view.programId, view.workoutId) : null;
     if (obj && !obj.name.trim()) { obj.name = view.name === 'program' ? 'Uten navn' : 'Ny økt'; save(); }
@@ -1689,12 +1792,36 @@ const actions = {
     } else {
       const w = getWorkout(view.programId, view.workoutId);
       if (!await ask(`Fjerne ${n} ${n === 1 ? 'øvelse' : 'øvelser'}?`, `Øvelsene fjernes fra «${w.name}». De ligger fortsatt i øvelsesbiblioteket.`, { ok: 'Fjern' })) return;
+      const ss = ssOf(w);
+      w.ss = ss.filter((_, i) => !selected.has(String(i)));
       w.exerciseIds = w.exerciseIds.filter((_, i) => !selected.has(String(i)));
     }
     selected.clear();
     save(); render();
   },
   'close-picker': () => closePickers(),
+
+  // Supersett
+  'ss-open': () => { ssDraft = []; render(); },
+  'ss-cancel': () => { ssDraft = null; render(); },
+  'ss-remove': d => { ssDraft.splice(+d.i, 1); render(); },
+  'ss-save': () => {
+    if (!ssDraft || ssDraft.length < 2) return;
+    const w = getWorkout(view.programId, view.workoutId);
+    ssOf(w);
+    const gid = uid();
+    ssDraft.forEach(id => { w.exerciseIds.push(id); w.ss.push(gid); });
+    ssDraft = null;
+    save(); render();
+  },
+  // Sveip til venstre + «Fjern» (bare når økta ikke er startet)
+  'swipe-remove': d => {
+    const w = getWorkout(view.programId, view.workoutId);
+    ssOf(w);
+    w.exerciseIds.splice(+d.i, 1);
+    w.ss.splice(+d.i, 1);
+    save(); render();
+  },
   'share-app': () => shareApp(),
   'install-help': () => showInstallHelp(),
   'install-dismiss': () => {
@@ -1719,6 +1846,8 @@ const actions = {
     if (!await ask(`Slette «${e.name}»?`, 'Den fjernes fra biblioteket og fra øktene den er lagt i. Loggen beholdes.', { ok: 'Slett øvelse' })) return;
     db.exercises = db.exercises.filter(x => x !== e);
     db.programs.forEach(p => p.workouts.forEach(w => {
+      const ss = ssOf(w);
+      w.ss = ss.filter((_, i) => w.exerciseIds[i] !== e.id);
       w.exerciseIds = w.exerciseIds.filter(id => id !== e.id);
     }));
     save(); go({ name: 'library' });
@@ -1736,7 +1865,7 @@ const actions = {
       programName: p.name,
       workoutName: w.name,
       startedAt: Date.now(),
-      exercises: w.exerciseIds.map(sessionEx),
+      exercises: w.exerciseIds.map((id, i) => ({ ...sessionEx(id), ss: ssOf(w)[i] })),
     };
     db.lastProgramByMode[p.type] = p.id;
     save(); go({ name: 'session' });
@@ -1824,6 +1953,17 @@ const actions = {
     };
     save(); go({ name: 'session' });
   },
+  // Supersett: ett nytt sett på hver øvelse i supersettet
+  'ss-add-round': d => {
+    const list = setTarget(d.scope).exercises;
+    d.idx.split(',').forEach(i => {
+      const ex = list[+i];
+      const prev = ex.sets[ex.sets.length - 1];
+      ex.sets.push(prev ? { ...prev } : emptySetFor(ex));
+    });
+    if (d.scope === 'active') save();
+    render();
+  },
   'add-set': d => {
     const ex = setTarget(d.scope).exercises[+d.i];
     const prev = ex.sets[ex.sets.length - 1];
@@ -1874,7 +2014,8 @@ const actions = {
     const a = db.active;
     // Spør om endringer i øvelsene skal lagres permanent i økta
     const w = getWorkout(a.programId, a.workoutId);
-    const ids = a.exercises.map(e => e.exerciseId).filter(id => getExercise(id));
+    const kept = a.exercises.filter(e => getExercise(e.exerciseId));
+    const ids = kept.map(e => e.exerciseId);
     if (w && JSON.stringify(ids) !== JSON.stringify(w.exerciseIds)) {
       const added = ids.filter(id => !w.exerciseIds.includes(id)).map(exName);
       const removed = w.exerciseIds.filter(id => !ids.includes(id)).map(exName);
@@ -1888,6 +2029,7 @@ const actions = {
             { ok: 'Ja, oppdater økta', cancel: 'Nei, bare denne gangen', danger: false }) &&
           await ask('Er du sikker?', `«${w.name}» endres permanent.`, { ok: 'Oppdater økta', cancel: 'Avbryt', danger: false })) {
         w.exerciseIds = ids;
+        w.ss = kept.map(e => e.ss ?? null);
       }
     }
     db.history.push({
@@ -1905,6 +2047,7 @@ const actions = {
         timed: isTimedEx(ex),
         kind: cardioKindOf(ex),
         sport: ex.sport ?? null,
+        ss: ex.ss ?? null,
         sets: ex.sets.filter(hasData),
       })),
     });
@@ -1985,7 +2128,13 @@ const forms = {
     getProgram(view.programId).workouts.push({ id: uid(), name: f.name, exerciseIds: [] });
   },
   'add-ex-to-workout': f => {
-    getWorkout(view.programId, view.workoutId).exerciseIds.push(f.exerciseId);
+    const w = getWorkout(view.programId, view.workoutId);
+    ssOf(w);
+    w.exerciseIds.push(f.exerciseId);
+    w.ss.push(null);
+  },
+  'ss-add': f => {
+    ssDraft?.push(f.exerciseId);
   },
   'new-exercise': f => {
     if (db.exercises.some(e => e.name.toLowerCase() === f.name.toLowerCase())) {
@@ -2115,7 +2264,9 @@ document.addEventListener('focusout', e => {
 const moveItem = (arr, from, to) => arr.splice(to, 0, arr.splice(from, 1)[0]);
 const DRAG_LISTS = {
   workout: (from, to) => {
-    moveItem(getWorkout(view.programId, view.workoutId).exerciseIds, from, to);
+    const w = getWorkout(view.programId, view.workoutId);
+    moveItem(ssOf(w), from, to);
+    moveItem(w.exerciseIds, from, to);
     selected.clear(); // valg er knyttet til plassering
   },
   program: (from, to) => moveItem(getProgram(view.programId).workouts, from, to),
@@ -2170,6 +2321,63 @@ function endDrag() {
 }
 document.addEventListener('pointerup', endDrag);
 document.addEventListener('pointercancel', endDrag);
+
+// ---------- Sveip til venstre for å fjerne øvelse fra økt ----------
+const SWIPE_W = 88; // bredden på «Fjern»-knappen
+let swipe = null;      // pågående sveip
+let openSwipe = null;  // rad som står åpen med «Fjern» synlig
+
+function closeSwipe(item) {
+  if (!item) return;
+  item.style.transform = '';
+  item.parentElement?.classList.remove('full');
+  // Skjul knappen igjen når raden har glidd tilbake
+  setTimeout(() => { if (openSwipe !== item) item.parentElement?.classList.remove('reveal'); }, 220);
+  if (openSwipe === item) openSwipe = null;
+}
+
+document.addEventListener('pointerdown', e => {
+  const item = e.target.closest('[data-swipe]');
+  if (openSwipe && openSwipe !== item && !e.target.closest('.swipe-del')) closeSwipe(openSwipe);
+  if (!item) return;
+  swipe = { item, x: e.clientX, y: e.clientY, base: item === openSwipe ? -SWIPE_W : 0, dx: 0, active: false };
+});
+
+document.addEventListener('pointermove', e => {
+  if (!swipe) return;
+  const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+  if (!swipe.active) {
+    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+    if (Math.abs(dy) > Math.abs(dx)) { swipe = null; return; } // vanlig scrolling
+    swipe.active = true;
+    swipe.item.setPointerCapture?.(e.pointerId);
+    swipe.item.classList.add('swiping');
+    swipe.item.parentElement.classList.add('reveal');
+  }
+  const x = Math.min(0, swipe.base + dx);
+  swipe.dx = x;
+  swipe.item.style.transform = `translateX(${x}px)`;
+  // Langt sveip = fjern med en gang (som i iPhone-apper)
+  swipe.item.parentElement.classList.toggle('full', x < -swipe.item.offsetWidth * 0.55);
+});
+
+function endSwipe() {
+  const s = swipe;
+  swipe = null;
+  if (!s?.active) return;
+  s.item.classList.remove('swiping');
+  if (s.dx < -s.item.offsetWidth * 0.55) {
+    openSwipe = null;
+    actions['swipe-remove']({ i: s.item.dataset.swipe });
+  } else if (s.dx < -SWIPE_W / 2) {
+    s.item.style.transform = `translateX(${-SWIPE_W}px)`;
+    openSwipe = s.item;
+  } else {
+    closeSwipe(s.item);
+  }
+}
+document.addEventListener('pointerup', endSwipe);
+document.addEventListener('pointercancel', endSwipe);
 
 // Klokkefelt: marker innholdet ved trykk, så nye tall erstatter den gamle tiden
 document.addEventListener('focusin', e => {

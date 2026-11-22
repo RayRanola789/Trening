@@ -980,11 +980,8 @@ function renderPrograms() {
   return `
     ${modeSwitch()}
     <h1>${cardio ? 'Cardioprogram' : 'Styrkeprogram'}</h1>
-    <form class="row" data-form="new-program" style="margin-bottom:16px">
-      <input name="name" placeholder="${cardio ? 'Nytt program, f.eks. «Løpeplan»' : 'Nytt program, f.eks. «Push/Pull/Legs»'}" required>
-      <button class="primary">Legg til</button>
-    </form>
-    ${items || '<p class="empty">Ingen program ennå. Opprett ditt første over.</p>'}
+    <button class="primary big" data-action="new-program" style="margin-bottom:16px">＋ Opprett nytt program</button>
+    ${items || '<p class="empty">Ingen program ennå.</p>'}
     ${freeStartHtml()}`;
 }
 
@@ -1011,7 +1008,8 @@ function renameActive(obj, isProgram) {
 
 const titleHtml = (name, what) => (editMode ? `
   <div class="title-row edit">
-    <input type="text" class="title-input" value="${esc(name)}" data-rename-input="${what}" aria-label="Navn" autocomplete="off">
+    <input type="text" class="title-input" value="${esc(name)}" data-rename-input="${what}" aria-label="Navn" autocomplete="off"
+           placeholder="${what === 'program' ? 'Navn, f.eks. «Push/Pull/Legs»' : 'Navn på økt'}">
     <button class="primary" data-action="edit-toggle">Ferdig</button>
   </div>` : `
   <h1 class="title-row">${esc(name)}
@@ -1763,6 +1761,15 @@ const actions = {
     save(); render();
   },
 
+  // Nytt program: opprettes og åpnes med navnefeltet klart (som «Opprett ny økt» i cardio)
+  'new-program': () => {
+    const p = { id: uid(), type: mode(), name: '', workouts: [] };
+    db.programs.push(p);
+    save();
+    go({ name: 'program', programId: p.id });
+    editMode = true;
+    render();
+  },
   // Redigeringsmodus av/på (blyanten / «Ferdig»)
   'edit-toggle': () => {
     if (editMode) {
